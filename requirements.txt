@@ -1,0 +1,8 @@
+flask
+jsonpatch
+sortedcontainers
+prometheus-flask-exporter
+requests
+kubernetes
+invoke
+gunicorn

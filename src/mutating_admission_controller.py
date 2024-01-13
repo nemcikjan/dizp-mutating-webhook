@@ -1,0 +1,85 @@
+from flask import Flask, request, jsonify
+import base64
+import jsonpatch
+from frico import FRICO, Task, Node
+from prometheus_flask_exporter import PrometheusMetrics
+from prometheus_client import Counter, Gauge
+from k8s import init_nodes, watch_pods
+import os
+import threading
+
+allocated_tasks_counter = Counter('allocated_tasks', 'Allocated tasks per node')
+unallocated_tasks_counter = Counter('unallocated_tasks', 'Unallocated tasks')
+total_tasks_counter = Counter('total_tasks', 'Total tasks')
+objective_value_gauge = Gauge('objective_value', 'Current objective value')
+offloaded_tasks_counter = Counter('offloaded_tasks', '')
+
+admission_controller = Flask(__name__)
+
+metrics = PrometheusMetrics(admission_controller)
+
+nodes: list[Node] = init_nodes()
+
+MAX_REALLOC = int(os.environ.get("MAX_REALLOC"))
+
+
+solver = FRICO(nodes,MAX_REALLOC)
+
+tasks_counter = 0
+offloaded_tasks = 0
+
+@admission_controller.route('/mutate/pods', methods=['POST'])
+def deployment_webhook_mutate():
+    request_info = request.get_json()
+    task_id = tasks_counter
+    task = Task(task_id, request_info.cpu, request_info.memory, request_info.priority, request_info.color)
+    total_tasks_counter.inc()
+    tasks_counter += 1
+
+    nodeName = ''
+    if solver.is_admissable(task):
+        nodeName = solver.solve(task)
+    allowed = nodeName != ''
+
+    if allowed:
+        allocated_tasks_counter.inc({"node": nodeName})
+    else:
+        unallocated_tasks_counter.inc()
+
+    if solver.offloaded_tasks > offloaded_tasks:
+        offloaded_tasks_counter.inc(solver.offloaded_tasks - offloaded_tasks)
+        offloaded_tasks = solver.offloaded_tasks
+
+    objective_value_gauge.set(solver.current_objective)
+
+    patches = [
+        {
+            "op": "add", 
+            "path": "/spec/nodeName", 
+            "value": nodeName
+        },
+        {
+            "op": "add",
+            "path": "/metadata/labels/task_id",
+            "value": str(task_id)
+        }, 
+        {
+            "op": "add",
+            "path": "/metadata/labels/node_name",
+            "value": nodeName
+        }
+    ]
+
+    return admission_response_patch(allowed, F"No capacity for task {task_id}", json_patch = jsonpatch.JsonPatch(patches))
+
+
+def admission_response_patch(allowed, message, json_patch):
+    base64_patch = base64.b64encode(json_patch.to_string().encode("utf-8")).decode("utf-8")
+    return jsonify({"response": {"allowed": allowed,
+                                 "status": {"message": message},
+                                 "patchType": "JSONPatch",
+                                 "patch": base64_patch}})
+
+if __name__ == '__main__':
+    threading.Thread(target=watch_pods, args=(solver), daemon=True).start()
+    admission_controller.run(host='0.0.0.0', port=443, ssl_context=("/server.crt", "/server.key"))

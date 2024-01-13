@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
 import base64
 import jsonpatch
-from frico import FRICO, Task, Node
+from frico import FRICO, Task, Node, Priority
 from prometheus_flask_exporter import PrometheusMetrics
 from prometheus_client import Counter, Gauge
 from k8s import init_nodes, watch_pods
@@ -36,8 +36,19 @@ def health():
 @admission_controller.route('/mutate/pods', methods=['POST'])
 def deployment_webhook_mutate():
     request_info = request.get_json()
+    pod = request_info.object
+    pod_metadata = pod.metadata
+
+    if not pod_metadata.labels["v2x"]:
+        return default_response()
+    
+    priority = Priority(int(pod_metadata.annotations["v2x.context/priority"]))
+    color = pod_metadata.annotations["v2x.context/color"]
+
+    pod_spec = pod.spec
     task_id = tasks_counter
-    task = Task(task_id, request_info.cpu, request_info.memory, request_info.priority, request_info.color)
+
+    task = Task(task_id, pod_spec.containers[0].requests["cpu"], pod_spec.containers[0].requests["memory"], priority, color)
     total_tasks_counter.inc()
     tasks_counter += 1
 
@@ -80,7 +91,7 @@ def deployment_webhook_mutate():
         }
     ]
 
-    return admission_response_patch(allowed, F"No capacity for task {task_id}", json_patch = jsonpatch.JsonPatch(patches))
+    return admission_response_patch(allowed, f"Task {task_id} assigned to {nodeName}" if allowed else f"No capacity for task {task_id}", json_patch = jsonpatch.JsonPatch(patches) if allowed else jsonpatch.JsonPatch([]))
 
 
 def admission_response_patch(allowed, message, json_patch):
@@ -89,6 +100,9 @@ def admission_response_patch(allowed, message, json_patch):
                                  "status": {"message": message},
                                  "patchType": "JSONPatch",
                                  "patch": base64_patch}})
+
+def default_response():
+    return jsonify({"response": {"allowed": True}})
 
 if __name__ == '__main__':
     threading.Thread(target=watch_pods, args=(solver), daemon=True).start()

@@ -36,16 +36,17 @@ def health():
 
 @admission_controller.route('/mutate', methods=['POST'])
 def deployment_webhook_mutate():
-    print(request_info)
     request_info = request.get_json()
-    pod = request_info.object
-    pod_metadata = pod.metadata
+    pod = request_info["request"]["object"]
+    pod_metadata = pod["metadata"]
 
-    if not pod_metadata.labels["v2x"]:
+    print(pod_metadata)
+
+    if not pod_metadata["labels"]["v2x"]:
         return default_response()
     
-    priority = Priority(int(pod_metadata.annotations["v2x.context/priority"]))
-    color = pod_metadata.annotations["v2x.context/color"]
+    priority = Priority(int(pod_metadata["annotations"]["v2x.context/priority"]))
+    color = pod_metadata["annotations"]["v2x.context/color"]
 
     pod_spec = pod.spec
     task_id = tasks_counter

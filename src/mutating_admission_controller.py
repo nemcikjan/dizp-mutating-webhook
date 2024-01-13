@@ -4,18 +4,23 @@ import jsonpatch
 from frico import FRICO, Task, Node, Priority
 from prometheus_flask_exporter import PrometheusMetrics
 from prometheus_client import Counter, Gauge
-from k8s import init_nodes, watch_pods,parse_cpu_to_millicores,parse_memory_to_bytes
+from k8s import init_nodes, watch_pods, parse_cpu_to_millicores, parse_memory_to_bytes
 import os
 import threading
 import http
+import logging
+import signal
 
 allocated_tasks_counter = Counter('allocated_tasks', 'Allocated tasks per node')
 unallocated_tasks_counter = Counter('unallocated_tasks', 'Unallocated tasks')
 total_tasks_counter = Counter('total_tasks', 'Total tasks')
 objective_value_gauge = Gauge('objective_value', 'Current objective value')
-offloaded_tasks_counter = Counter('offloaded_tasks', '')
+offloaded_tasks_counter = Counter('offloaded_tasks', 'Offloaded tasks')
 
 admission_controller = Flask(__name__)
+
+logging.basicConfig(filename='app.log', level=logging.DEBUG, 
+                    format='%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]')
 
 metrics = PrometheusMetrics(admission_controller)
 
@@ -25,10 +30,24 @@ nodes: list[Node] = init_nodes()
 MAX_REALLOC = int(os.environ.get("MAX_REALLOC"))
 
 
-solver = FRICO(nodes,MAX_REALLOC)
+solver = FRICO(nodes, MAX_REALLOC)
 
-tasks_counter = 0
+should_continue: dict[str, bool] = {'flag': True}
+
+thread = threading.Thread(target=watch_pods, args=(solver, should_continue), daemon=True)
+thread.start()
+
+def handle_sigterm(*args):
+    global should_continue
+    admission_controller.logger.info("SIGTERM received, shutting down")
+    should_continue['flag'] = False
+    thread.join()
+    os._exit(0)
+
+signal.signal(signal.SIGTERM, handle_sigterm)
+
 offloaded_tasks = 0
+tasks_counter = 0
 
 @admission_controller.route("/health", methods=["GET"])
 def health():
@@ -36,22 +55,27 @@ def health():
 
 @admission_controller.route('/mutate', methods=['POST'])
 def deployment_webhook_mutate():
+    global tasks_counter, offloaded_tasks, solver
     request_info = request.get_json()
     pod = request_info["request"]["object"]
+    uid = request_info["request"]["uid"]
     pod_metadata = pod["metadata"]
 
-    print(pod_metadata)
+    admission_controller.logger.info(pod_metadata)
 
-    if not pod_metadata["labels"]["v2x"]:
-        return default_response()
+    if "v2x" not in pod_metadata["labels"]:
+        return default_response(uid)
     
     priority = Priority(int(pod_metadata["annotations"]["v2x.context/priority"]))
     color = pod_metadata["annotations"]["v2x.context/color"]
 
-    pod_spec = pod.spec
+    admission_controller.logger.info(f"Priority: {priority} Color: {color}",)
+
+    pod_spec = pod["spec"]
+    admission_controller.logger.info(pod_spec)
     task_id = tasks_counter
 
-    task = Task(task_id, parse_cpu_to_millicores(pod_spec.containers[0].requests["cpu"]), parse_memory_to_bytes(pod_spec.containers[0].requests["memory"]), priority, color)
+    task = Task(task_id, parse_cpu_to_millicores(pod_spec["containers"][0]["resources"]["requests"]["cpu"]), parse_memory_to_bytes(pod_spec["containers"][0]["resources"]["requests"]["memory"]), priority, color)
     total_tasks_counter.inc()
     tasks_counter += 1
 
@@ -69,7 +93,7 @@ def deployment_webhook_mutate():
         offloaded_tasks_counter.inc(solver.offloaded_tasks - offloaded_tasks)
         offloaded_tasks = solver.offloaded_tasks
 
-    objective_value_gauge.set(solver.current_objective)
+    objective_value_gauge.set(solver.get_current_objective())
 
     patches = [
         {
@@ -94,19 +118,36 @@ def deployment_webhook_mutate():
         }
     ]
 
-    return admission_response_patch(allowed, f"Task {task_id} assigned to {nodeName}" if allowed else f"No capacity for task {task_id}", json_patch = jsonpatch.JsonPatch(patches) if allowed else jsonpatch.JsonPatch([]))
+    admission_controller.logger.info(f"Task {task_id} -> node {nodeName}")
+
+    return admission_response_patch(allowed, uid, f"Task {task_id} assigned to {nodeName}" if allowed else f"No capacity for task {task_id}", json_patch = jsonpatch.JsonPatch(patches) if allowed else jsonpatch.JsonPatch([]))
 
 
-def admission_response_patch(allowed, message, json_patch):
+def admission_response_patch(allowed, uid, message, json_patch):
     base64_patch = base64.b64encode(json_patch.to_string().encode("utf-8")).decode("utf-8")
-    return jsonify({"response": {"allowed": allowed,
-                                 "status": {"message": message},
-                                 "patchType": "JSONPatch",
-                                 "patch": base64_patch}})
+    return jsonify({
+        "apiVersion": "admission.k8s.io/v1",
+        "kind": "AdmissionReview",
+        "response": {
+            "allowed": allowed,
+            "uid": uid,
+            "status": {"message": message},
+            "patchType": "JSONPatch",
+            "patch": base64_patch
+            }
+        })
 
-def default_response():
-    return jsonify({"response": {"allowed": True}})
+def default_response(uid: str):
+    return jsonify({
+        "apiVersion": "admission.k8s.io/v1",
+        "kind": "AdmissionReview",
+        "response": {
+            "allowed": False, 
+            "uid": uid,
+            "status": {"message": "Not in V2X context"},
+            }
+        })
+
 
 if __name__ == '__main__':
-    threading.Thread(target=watch_pods, args=(solver), daemon=True).start()
     admission_controller.run(host='0.0.0.0', port=443, ssl_context=("/server.crt", "/server.key"))

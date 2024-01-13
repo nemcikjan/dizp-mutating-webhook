@@ -1,6 +1,7 @@
 from enum import Enum
 from typing import Optional
 from sortedcontainers import SortedList
+import logging
 
 class Priority(Enum):
     NONE = 1
@@ -98,6 +99,10 @@ class FRICO:
         self.knapsacks = SortedList(nodes)
         self.realloc_threshold = realloc_threshold
         self.offloaded_tasks = 0
+        self.current_objective = 0
+
+    def get_current_objective(self):
+        return self.current_objective
 
     def get_offloaded_tasks(self):
         return self.offloaded_tasks
@@ -120,12 +125,17 @@ class FRICO:
 
     def is_admissable(self, task: Task) -> bool:
         overall_free_capacity = [sum(t) for t in zip(*[k.remaining_capacity() for k in self.knapsacks])]
+        logging.info(f"Overall free capacity {overall_free_capacity}")
+        logging.info(f"Task: CPU {task.cpu_requirement} Memory {task.memory_requirement}")
         return task.cpu_requirement <= overall_free_capacity[0] and task.memory_requirement <= overall_free_capacity[1]
 
     def solve(self, task: Task) -> str:
+        logging.info(self.knapsacks)
         knapsacks = self.find_applicable(task)
+        logging.info(len(knapsacks))
         if len(knapsacks) > 0:
-            name = knapsacks[0]
+            name = knapsacks[0].name
+            logging.info(name)
             self.allocate(knapsacks[0], task)
             return name
         else:
@@ -191,7 +201,11 @@ class FRICO:
                 return allocated_node
 
     def find_applicable(self, task: Task) -> list[Node]:
-        return [x for x in self.knapsacks if task.color in x.colors and x.remaining_capacity()[0] >= task.cpu_requirement and x.remaining_capacity()[1] >= task.memory_requirement]
+        for k in self.knapsacks:
+            logging.info(f"{task.color} {k.colors} {task.color in k.colors}")
+            logging.info(f"{task.cpu_requirement} {k.remaining_capacity()[0]} {k.remaining_capacity()[0] >= task.cpu_requirement}")
+            logging.info(f"{task.memory_requirement} {k.remaining_capacity()[1]} {k.remaining_capacity()[1] >= task.memory_requirement}")
+        return [k for k in self.knapsacks if task.color in k.colors and k.remaining_capacity()[0] >= task.cpu_requirement and k.remaining_capacity()[1] >= task.memory_requirement]
     
     def get_by_color(self, color: str):
         return [x for x in self.knapsacks if color in x.colors]

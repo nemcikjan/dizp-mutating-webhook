@@ -70,6 +70,11 @@ def deployment_webhook_mutate():
         }, 
         {
             "op": "add",
+            "path": "/metadata/labels/frico",
+            "value": "true"
+        },
+        {
+            "op": "add",
             "path": "/metadata/labels/node_name",
             "value": nodeName
         }

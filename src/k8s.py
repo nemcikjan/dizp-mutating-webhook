@@ -10,14 +10,6 @@ def init_nodes() -> list[Node]:
     ret = v1.list_node()
     nodes: list[Node] = []
     for i, n in enumerate(ret.items):
-        ip: str
-        if n.metadata.name == "loki":
-            ip = "172.25.216.162"
-        elif n.metadata.name == "poseidon":
-            ip = "172.25.167.14"
-        elif n.metadata.name == "thor":
-            ip = "172.25.111.102"
-        print(n.status)
         nodes.append(Node(i, n.metadata.name, int(n.status.capacity["cpu"]), int(''.join(re.findall(r'\d+', n.status.capacity["memory"]))) * 1024 / 1e9, str.split(n.metadata.annotations["colors"])))
     
     return nodes
@@ -44,7 +36,8 @@ def watch_pods(solver: FRICO):
     for event in w.stream(v1.list_namespaced_pod("tasks")):
         pod = event['object']
         pod_status = pod.status.phase
+        print(pod.metadata.labels)
 
-        if pod_status == "Succeeded":
+        if pod.metadata.labels["frico"] == "true" and pod_status == "Succeeded":
             print(f"Pod {pod.metadata.name} succeeded.")
             handle_pod(solver, int(pod.metadata.labels["task_id"]), pod.metadata.labels["node_name"])

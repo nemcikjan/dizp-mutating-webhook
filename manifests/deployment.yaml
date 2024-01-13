@@ -38,7 +38,10 @@ spec:
       serviceAccountName: frico
       containers:
         - name: webhook
-          image: ghcr.io/nemcikjan/dizp-mutating-webhook:v20240113-0e05c3b
+          env:
+            - name: MAX_REALLOC
+              value: "4"
+          image: ghcr.io/nemcikjan/dizp-mutating-webhook:v20240113-1eb6a9d
           imagePullPolicy: IfNotPresent
           args:
             - "--bind=0.0.0.0:443"

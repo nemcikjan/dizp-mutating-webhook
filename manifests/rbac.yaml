@@ -1,0 +1,31 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: frico-reader
+rules:
+  - apiGroups: [""] # "" indicates the core API group
+    resources: ["pods"]
+    verbs: ["get", "watch", "list"]
+  - apiGroups: [""] # "" indicates the core API group
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+# This role binding allows "dave" to read secrets in the "development" namespace.
+# You need to already have a ClusterRole named "secret-reader".
+kind: ClusterRoleBinding
+metadata:
+  name: frico-reader
+  #
+  # The namespace of the RoleBinding determines where the permissions are granted.
+  # This only grants permissions within the "development" namespace.
+  # namespace: frico
+subjects:
+  - kind: ServiceAccount
+    name: frico # Name is case sensitive
+    apiGroup: ""
+    namespace: frico
+roleRef:
+  kind: ClusterRole
+  name: frico-reader
+  apiGroup: rbac.authorization.k8s.io

@@ -64,8 +64,8 @@ def generate_keys(c, service, namespace, directory="keys"):
 
     print("==> Generating CA")
 
-    command = """openssl genrsa -out ca.key 2048
-openssl req -x509 -new -nodes -key ca.key -days 100000 -out ca.crt -subj '/CN=admission_ca'"""
+    command = f"""openssl genrsa -out ca.key 2048
+openssl req -x509 -new -nodes -key ca.key -days 100000 -out ca.crt -subj '/C=CN' -addext 'subjectAltName = DNS:{service}.{namespace}.svc'"""
 
     subprocess.run(command, cwd=directory, shell=True, stderr=subprocess.DEVNULL)
 

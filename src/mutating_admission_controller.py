@@ -19,6 +19,7 @@ admission_controller = Flask(__name__)
 
 metrics = PrometheusMetrics(admission_controller)
 
+
 nodes: list[Node] = init_nodes()
 
 MAX_REALLOC = int(os.environ.get("MAX_REALLOC"))
@@ -33,8 +34,9 @@ offloaded_tasks = 0
 def health():
     return ("", http.HTTPStatus.NO_CONTENT)
 
-@admission_controller.route('/mutate/pods', methods=['POST'])
+@admission_controller.route('/mutate', methods=['POST'])
 def deployment_webhook_mutate():
+    print(request_info)
     request_info = request.get_json()
     pod = request_info.object
     pod_metadata = pod.metadata

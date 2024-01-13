@@ -43,7 +43,7 @@ spec:
           env:
             - name: MAX_REALLOC
               value: "4"
-          image: ghcr.io/nemcikjan/dizp-mutating-webhook:v20240113-849f839
+          image: ghcr.io/nemcikjan/dizp-mutating-webhook:v20240113-99b5fc9
           imagePullPolicy: IfNotPresent
           args:
             - "--bind=0.0.0.0:443"

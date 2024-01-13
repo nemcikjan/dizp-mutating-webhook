@@ -4,7 +4,7 @@ import jsonpatch
 from frico import FRICO, Task, Node, Priority
 from prometheus_flask_exporter import PrometheusMetrics
 from prometheus_client import Counter, Gauge
-from k8s import init_nodes, watch_pods
+from k8s import init_nodes, watch_pods,parse_cpu_to_millicores,parse_memory_to_bytes
 import os
 import threading
 import http
@@ -51,7 +51,7 @@ def deployment_webhook_mutate():
     pod_spec = pod.spec
     task_id = tasks_counter
 
-    task = Task(task_id, pod_spec.containers[0].requests["cpu"], pod_spec.containers[0].requests["memory"], priority, color)
+    task = Task(task_id, parse_cpu_to_millicores(pod_spec.containers[0].requests["cpu"]), parse_memory_to_bytes(pod_spec.containers[0].requests["memory"]), priority, color)
     total_tasks_counter.inc()
     tasks_counter += 1
 

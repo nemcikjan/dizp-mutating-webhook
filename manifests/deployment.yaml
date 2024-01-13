@@ -35,9 +35,10 @@ spec:
         app: webhook
       name: webhook
     spec:
+      serviceAccountName: frico
       containers:
         - name: webhook
-          image: ghcr.io/nemcikjan/dizp-mutating-webhook:v20240113-5709f8e
+          image: ghcr.io/nemcikjan/dizp-mutating-webhook:v20240113-5bef36f
           imagePullPolicy: IfNotPresent
           args:
             - "--bind=0.0.0.0:443"
@@ -66,3 +67,9 @@ spec:
         - name: webhook-certs
           secret:
             secretName: frico-webhook-certs
+---
+kind: ServiceAccount
+apiVersion: v1
+metadata:
+  name: frico
+  namespace: frico

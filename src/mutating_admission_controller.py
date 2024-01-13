@@ -7,6 +7,7 @@ from prometheus_client import Counter, Gauge
 from k8s import init_nodes, watch_pods
 import os
 import threading
+import http
 
 allocated_tasks_counter = Counter('allocated_tasks', 'Allocated tasks per node')
 unallocated_tasks_counter = Counter('unallocated_tasks', 'Unallocated tasks')
@@ -27,6 +28,10 @@ solver = FRICO(nodes,MAX_REALLOC)
 
 tasks_counter = 0
 offloaded_tasks = 0
+
+@admission_controller.route("/health", methods=["GET"])
+def health():
+    return ("", http.HTTPStatus.NO_CONTENT)
 
 @admission_controller.route('/mutate/pods', methods=['POST'])
 def deployment_webhook_mutate():

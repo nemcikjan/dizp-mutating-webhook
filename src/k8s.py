@@ -15,7 +15,8 @@ def init_nodes() -> list[Node]:
         elif n.metadata.name == "poseidon":
             ip = "172.25.167.14"
         elif n.metadata.name == "thor":
-            ip = "172.25.111.102" 
+            ip = "172.25.111.102"
+        print(n.status)
         nodes.append(Node(i, n.metadata.name, int(n.status.capacity.cpu), int(n.status.capacity.memory) * 1024 / 1e9, str.split(n.metadata.annotations["colors"])))
     
     return nodes

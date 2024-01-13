@@ -1,5 +1,6 @@
 from kubernetes import client, config, watch
 from frico import Node, FRICO
+import re
 
 def init_nodes() -> list[Node]:
     # Configs can be set in Configuration class directly or using helper utility
@@ -17,7 +18,7 @@ def init_nodes() -> list[Node]:
         elif n.metadata.name == "thor":
             ip = "172.25.111.102"
         print(n.status)
-        nodes.append(Node(i, n.metadata.name, int(n.status.capacity.cpu), int(n.status.capacity.memory) * 1024 / 1e9, str.split(n.metadata.annotations["colors"])))
+        nodes.append(Node(i, n.metadata.name, int(n.status.capacity["cpu"]), int(''.join(re.findall(r'\d+', n.status.capacity["memory"]))) * 1024 / 1e9, str.split(n.metadata.annotations["colors"])))
     
     return nodes
 

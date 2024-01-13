@@ -30,6 +30,7 @@ def watch_pods(solver: FRICO, stop_signal: Event):
     config.load_incluster_config()  # or config.load_incluster_config() if you are running inside a cluster
 
     # Create a client for the CoreV1 API
+    corev1 = client.CoreV1Api()
     batchv1 = client.BatchV1Api()
 
     # Create a watcher for Pod events
@@ -37,18 +38,18 @@ def watch_pods(solver: FRICO, stop_signal: Event):
     while not stop_signal.is_set():
         logging.info("Starting watching for pods")
         # Watch for events related to Pods
-        for event in w.stream(batchv1.list_namespaced_job, "tasks"):
-            job = event['object']
-            job_status = job.status.succeeded
-            logging.info(job.metadata.labels)
-            logging.info(job_status)
-            logging.info(job)
+        for event in w.stream(corev1.list_namespaced_pod, "tasks"):
+            pod = event['object']
+            # job_status = job.status.succeeded
+            pod_status = pod.status.phase
+            logging.info(pod.metadata.labels)
+            logging.info(pod_status)
 
-            if "frico" in job.metadata.labels and job_status == 1:
-                logging.info(f"Pod {job.metadata.name} succeeded")
-                handle_pod(solver, int(job.metadata.labels["task_id"]), job.metadata.labels["node_name"])
-    w.stop()
+            if "frico" in pod.metadata.labels and pod_status == "Succeeded":
+                logging.info(f"Pod {pod.metadata.name} succeeded")
+                handle_pod(solver, int(pod.metadata.labels["task_id"]), pod.metadata.labels["node_name"])
     logging.info("Stopping thread")
+    w.stop()
 
 def parse_cpu_to_millicores(cpu_str):
     """

@@ -117,11 +117,15 @@ class FRICO:
         self.knapsacks.remove(node)
         node.allocate_task(task)
         self.knapsacks.add(node)
+        for k in self.knapsacks:
+            logging.info(f"{k.name} - {k.remaining_capacity()}")
 
     def release(self, node: Node, task: Task):
         self.knapsacks.remove(node)
         node.release_task(task)
         self.knapsacks.add(node)
+        for k in self.knapsacks:
+            logging.info(f"{k.name} - {k.remaining_capacity()}")
 
     def is_admissable(self, task: Task) -> bool:
         overall_free_capacity = [sum(t) for t in zip(*[k.remaining_capacity() for k in self.knapsacks])]

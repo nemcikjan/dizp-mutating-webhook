@@ -57,25 +57,26 @@ def health():
 def deployment_webhook_mutate():
     global tasks_counter, offloaded_tasks, solver
     request_info = request.get_json()
-    job = request_info["request"]["object"]
+    pod = request_info["request"]["object"]
     uid = request_info["request"]["uid"]
-    job_metadata = job["metadata"]
+    pod_metadata = pod["metadata"]
 
-    admission_controller.logger.info(job_metadata)
+    admission_controller.logger.info(pod_metadata)
 
-    if "v2x" not in job_metadata["labels"]:
+    if "v2x" not in pod_metadata["labels"]:
         return default_response(uid)
     
-    priority = Priority(int(job_metadata["annotations"]["v2x.context/priority"]))
-    color = job_metadata["annotations"]["v2x.context/color"]
+    priority = Priority(int(pod_metadata["annotations"]["v2x.context/priority"]))
+    color = pod_metadata["annotations"]["v2x.context/color"]
 
     admission_controller.logger.info(f"Priority: {priority} Color: {color}",)
 
-    job_spec = job["spec"]["template"]["spec"]
-    admission_controller.logger.info(job_spec)
+    # job_spec = job["spec"]["template"]["spec"]
+    pod_spec = pod["spec"]
+    admission_controller.logger.info(pod_spec)
     task_id = tasks_counter
 
-    task = Task(task_id, parse_cpu_to_millicores(job_spec["containers"][0]["resources"]["requests"]["cpu"]), parse_memory_to_bytes(job_spec["containers"][0]["resources"]["requests"]["memory"]), priority, color)
+    task = Task(task_id, parse_cpu_to_millicores(pod_spec["containers"][0]["resources"]["requests"]["cpu"]), parse_memory_to_bytes(pod_spec["containers"][0]["resources"]["requests"]["memory"]), priority, color)
     total_tasks_counter.inc()
     tasks_counter += 1
 
@@ -98,12 +99,12 @@ def deployment_webhook_mutate():
     patches = [
         {
             "op": "add", 
-            "path": "/spec/template/spec/nodeName", 
+            "path": "/spec/nodeName", 
             "value": nodeName
         },
         {
             "op": "add",
-            "path": "/metadata/labels/task-id",
+            "path": "/metadata/labels/task_id",
             "value": str(task_id)
         }, 
         {

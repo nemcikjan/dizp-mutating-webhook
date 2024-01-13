@@ -9,6 +9,9 @@ rules:
   - apiGroups: [""] # "" indicates the core API group
     resources: ["nodes"]
     verbs: ["get", "list"]
+  - apiGroups: ["batch"] # "" indicates the core API group
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 # This role binding allows "dave" to read secrets in the "development" namespace.

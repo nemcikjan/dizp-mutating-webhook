@@ -32,15 +32,15 @@ MAX_REALLOC = int(os.environ.get("MAX_REALLOC"))
 
 solver = FRICO(nodes, MAX_REALLOC)
 
-should_continue: dict[str, bool] = {'flag': True}
+stop_event = threading.Event()
 
-thread = threading.Thread(target=watch_pods, args=(solver, should_continue), daemon=True)
+thread = threading.Thread(target=watch_pods, args=(solver, stop_event), daemon=True)
 thread.start()
 
 def handle_sigterm(*args):
     global should_continue
     admission_controller.logger.info("SIGTERM received, shutting down")
-    should_continue['flag'] = False
+    stop_event.set()
     thread.join()
     os._exit(0)
 
@@ -57,25 +57,25 @@ def health():
 def deployment_webhook_mutate():
     global tasks_counter, offloaded_tasks, solver
     request_info = request.get_json()
-    pod = request_info["request"]["object"]
+    job = request_info["request"]["object"]
     uid = request_info["request"]["uid"]
-    pod_metadata = pod["metadata"]
+    job_metadata = job["metadata"]
 
-    admission_controller.logger.info(pod_metadata)
+    admission_controller.logger.info(job_metadata)
 
-    if "v2x" not in pod_metadata["labels"]:
+    if "v2x" not in job_metadata["labels"]:
         return default_response(uid)
     
-    priority = Priority(int(pod_metadata["annotations"]["v2x.context/priority"]))
-    color = pod_metadata["annotations"]["v2x.context/color"]
+    priority = Priority(int(job_metadata["annotations"]["v2x.context/priority"]))
+    color = job_metadata["annotations"]["v2x.context/color"]
 
     admission_controller.logger.info(f"Priority: {priority} Color: {color}",)
 
-    pod_spec = pod["spec"]
-    admission_controller.logger.info(pod_spec)
+    job_spec = job["spec"]["template"]["spec"]
+    admission_controller.logger.info(job_spec)
     task_id = tasks_counter
 
-    task = Task(task_id, parse_cpu_to_millicores(pod_spec["containers"][0]["resources"]["requests"]["cpu"]), parse_memory_to_bytes(pod_spec["containers"][0]["resources"]["requests"]["memory"]), priority, color)
+    task = Task(task_id, parse_cpu_to_millicores(job_spec["containers"][0]["resources"]["requests"]["cpu"]), parse_memory_to_bytes(job_spec["containers"][0]["resources"]["requests"]["memory"]), priority, color)
     total_tasks_counter.inc()
     tasks_counter += 1
 
@@ -98,12 +98,12 @@ def deployment_webhook_mutate():
     patches = [
         {
             "op": "add", 
-            "path": "/spec/nodeName", 
+            "path": "/spec/template/spec/nodeName", 
             "value": nodeName
         },
         {
             "op": "add",
-            "path": "/metadata/labels/task_id",
+            "path": "/metadata/labels/task-id",
             "value": str(task_id)
         }, 
         {

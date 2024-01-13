@@ -85,7 +85,7 @@ def deployment_webhook_mutate():
     allowed = nodeName != ''
 
     if allowed:
-        allocated_tasks_counter.inc({"node": nodeName})
+        allocated_tasks_counter.inc(exemplar={"node": nodeName})
     else:
         unallocated_tasks_counter.inc()
 

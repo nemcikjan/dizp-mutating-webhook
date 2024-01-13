@@ -18,8 +18,9 @@ class BaseTask(object):
         self.id = id
 
 class Task(BaseTask):
-    def __init__(self, id: int, cpu_requirement: int, memory_requirement: int, priority: Priority, color: str):
+    def __init__(self, id: int, name: str, cpu_requirement: int, memory_requirement: int, priority: Priority, color: str):
         self.priority = priority
+        self.name = name
         super().__init__(id, cpu_requirement, memory_requirement, color)
     
     def objective_value(self):
@@ -133,7 +134,8 @@ class FRICO:
         logging.info(f"Task: CPU {task.cpu_requirement} Memory {task.memory_requirement}")
         return task.cpu_requirement <= overall_free_capacity[0] and task.memory_requirement <= overall_free_capacity[1]
 
-    def solve(self, task: Task) -> str:
+    def solve(self, task: Task) -> (str, list[tuple[Task, Node]]):
+        tasks_to_reschedule: list[tuple[Task, Node]] = []
         logging.info(self.knapsacks)
         knapsacks = self.find_applicable(task)
         logging.info(len(knapsacks))
@@ -141,7 +143,7 @@ class FRICO:
             name = knapsacks[0].name
             logging.info(name)
             self.allocate(knapsacks[0], task)
-            return name
+            return (name, tasks_to_reschedule)
         else:
             colored_knapsacks = self.get_by_color(task.color)
             allocated = False
@@ -151,6 +153,7 @@ class FRICO:
                     for n in [x for x in self.knapsacks if x != k and t.color in x.colors]:
                         if n.can_allocate(t):
                             self.allocate(n, t)
+                            tasks_to_reschedule.append((t, n))
                             self.release(k, t)
                             break                                      
     
@@ -163,7 +166,7 @@ class FRICO:
                     break
             if allocated and choosen_node is not None:
                 self.allocate(choosen_node, task)
-                return choosen_node.name
+                return (choosen_node.name, tasks_to_reschedule)
             elif allocated and choosen_node is None:
                 raise Exception("Something gone wrong")
             else: 
@@ -200,9 +203,10 @@ class FRICO:
                         if any(k.can_allocate(t) for k in cks):
                             s_colored_knapsacks = list(filter(lambda k: k.can_allocate(t), cks))
                             self.allocate(s_colored_knapsacks[0], t)
+                            tasks_to_reschedule.append((t, s_colored_knapsacks[0]))
                         else:
                             self.offloaded_tasks += 1
-                return allocated_node
+                return (allocated_node, tasks_to_reschedule)
 
     def find_applicable(self, task: Task) -> list[Node]:
         for k in self.knapsacks:
@@ -213,3 +217,12 @@ class FRICO:
     
     def get_by_color(self, color: str):
         return [x for x in self.knapsacks if color in x.colors]
+    
+def handle_pod(solver: FRICO, task_id: int, node_name: str):
+    try:
+        node = solver.get_node_by_name(node_name)
+        task = node.get_task_by_id(task_id)
+        logging.info(f"Releasing task {task.id} from {node.name}")
+        solver.release(node, task)
+    except Exception as e:
+        print(e)

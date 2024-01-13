@@ -4,12 +4,13 @@ import jsonpatch
 from frico import FRICO, Task, Node, Priority
 from prometheus_flask_exporter import PrometheusMetrics
 from prometheus_client import Counter, Gauge
-from k8s import init_nodes, watch_pods, parse_cpu_to_millicores, parse_memory_to_bytes
+from k8s import init_nodes, watch_pods, parse_cpu_to_millicores, parse_memory_to_bytes, reschedule
 import os
 import threading
 import http
 import logging
 import signal
+import time
 
 allocated_tasks_counter = Counter('allocated_tasks', 'Allocated tasks per node')
 unallocated_tasks_counter = Counter('unallocated_tasks', 'Unallocated tasks')
@@ -19,7 +20,7 @@ offloaded_tasks_counter = Counter('offloaded_tasks', 'Offloaded tasks')
 
 admission_controller = Flask(__name__)
 
-logging.basicConfig(filename='app.log', level=logging.DEBUG, 
+logging.basicConfig(filename='app.log', level=logging.INFO, 
                     format='%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]')
 
 metrics = PrometheusMetrics(admission_controller)
@@ -66,27 +67,51 @@ def deployment_webhook_mutate():
     if "v2x" not in pod_metadata["labels"]:
         return default_response(uid)
     
+    if "frico_skip" in pod_metadata["labels"]:
+        patch = [
+            {
+            "op": "remove", 
+            "path": "/metadata/labels/frico_skip", 
+            }
+        ]
+        base64_patch = base64.b64encode(patch.to_string().encode("utf-8")).decode("utf-8")
+        return jsonify({
+        "apiVersion": "admission.k8s.io/v1",
+        "kind": "AdmissionReview",
+        "response": {
+            "allowed": True, 
+            "uid": uid,
+            "status": {"message": "Frico decided"},
+            "patchType": "JSONPatch",
+            "patch": base64_patch
+            }
+        })
+    
     priority = Priority(int(pod_metadata["annotations"]["v2x.context/priority"]))
     color = pod_metadata["annotations"]["v2x.context/color"]
+    exec_time = pod_metadata["annotations"]["v2x.context/exec_time"]
 
-    admission_controller.logger.info(f"Priority: {priority} Color: {color}",)
+    admission_controller.logger.info(f"Priority: {priority} Color: {color} Exec time: {exec_time}")
 
     # job_spec = job["spec"]["template"]["spec"]
     pod_spec = pod["spec"]
     admission_controller.logger.info(pod_spec)
     task_id = tasks_counter
 
-    task = Task(task_id, parse_cpu_to_millicores(pod_spec["containers"][0]["resources"]["requests"]["cpu"]), parse_memory_to_bytes(pod_spec["containers"][0]["resources"]["requests"]["memory"]), priority, color)
+    task = Task(task_id, pod_metadata["name"], parse_cpu_to_millicores(pod_spec["containers"][0]["resources"]["requests"]["cpu"]), parse_memory_to_bytes(pod_spec["containers"][0]["resources"]["requests"]["memory"]), priority, color)
     total_tasks_counter.inc()
     tasks_counter += 1
 
     nodeName = ''
+    shit_to_be_done: list[tuple[Task, Node]] = []
     if solver.is_admissable(task):
-        nodeName = solver.solve(task)
+        nodeName, shit_to_be_done = solver.solve(task)
     allowed = nodeName != ''
 
     if allowed:
         allocated_tasks_counter.inc(exemplar={"node": nodeName})
+        for shit, to_shit in shit_to_be_done:
+            reschedule(shit.name, "tasks", to_shit.name)
     else:
         unallocated_tasks_counter.inc()
 
@@ -116,6 +141,16 @@ def deployment_webhook_mutate():
             "op": "add",
             "path": "/metadata/labels/node_name",
             "value": nodeName
+        },
+        {
+            "op": "add",
+            "path": "/metadata/labels/arrival_time",
+            "value": str(int(time.time()))
+        },
+        {
+            "op": "add",
+            "path": "/metadata/labels/exec_time",
+            "value": str(exec_time)
         }
     ]
 

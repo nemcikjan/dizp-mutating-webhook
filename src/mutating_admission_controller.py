@@ -62,8 +62,6 @@ def deployment_webhook_mutate():
     uid = request_info["request"]["uid"]
     pod_metadata = pod["metadata"]
 
-    admission_controller.logger.info(pod_metadata)
-
     if "v2x" not in pod_metadata["labels"]:
         return default_response(uid)
     

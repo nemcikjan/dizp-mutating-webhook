@@ -1,6 +1,7 @@
 from enum import Enum
 from typing import Optional
 from sortedcontainers import SortedList
+import heapq
 import logging
 
 class Priority(Enum):
@@ -21,15 +22,15 @@ class Task(BaseTask):
     def __init__(self, id: int, name: str, cpu_requirement: int, memory_requirement: int, priority: Priority, color: str):
         self.priority = priority
         self.name = name
+        self.node_cpu_capacity = 0
+        self.node_memory_capacity = 0
         super().__init__(id, cpu_requirement, memory_requirement, color)
     
     def objective_value(self):
-        return self.priority.value
+        return (self.priority.value / 5) * ((((self.node_cpu_capacity - self.cpu_requirement) / self.node_cpu_capacity) + ((self.node_memory_capacity - self.memory_requirement) / self.node_memory_capacity)) / 2)
 
     def __lt__(self, other):
-        return (-self.objective_value(), self.cpu_requirement, self.memory_requirement) > (-other.objective_value(), other.cpu_requirement, other.memory_requirement)
-
-
+        return (self.objective_value()) < (other.objective_value())
 class Node(object):
     id: int
     name: str
@@ -59,6 +60,8 @@ class Node(object):
     
     def allocate_task(self, task: Task):
         if self.remaining_cpu_capacity >= task.cpu_requirement and self.remaining_memory_capacity >= task.memory_requirement:
+            task.node_memory_capacity = self.memory_capacity
+            task.node_cpu_capacity = self.cpu_capacity
             self.allocated_tasks.add(task)
             self.assigned_tasks += 1
             self.remaining_cpu_capacity -= task.cpu_requirement
@@ -90,9 +93,8 @@ class Node(object):
 
 
 class FRICO:
-    # knapsacks: list[Node]
-    # knapsacks: list[tuple[tuple[float, float, int], Node]]
-    knapsacks: SortedList
+    knapsacks: list[tuple[float, Node]]
+    # knapsacks: SortedList
     realloc_threshold: int
     offloaded_tasks: int
     current_objective: int
@@ -101,70 +103,108 @@ class FRICO:
         self.realloc_threshold = realloc_threshold
         self.offloaded_tasks = 0
         self.current_objective = 0
+        self.knapsacks = [(self.calculate_capacity(n), n) for n in nodes]
+        heapq.heapify(self.knapsacks)
 
     def get_current_objective(self):
         return self.current_objective
+    
+    def calculate_capacity(self, node: Node) -> float:
+        return (((node.cpu_capacity - node.remaining_cpu_capacity) / node.cpu_capacity) + ((node.memory_capacity - node.remaining_memory_capacity) / node.memory_capacity)) / 2
+
+    def update_heap(self):
+        # Rebuild the heap when the priorities change
+        self.knapsacks = [(self.calculate_capacity(n), n) for _, n in self.knapsacks]
+        heapq.heapify(self.knapsacks)
 
     def get_offloaded_tasks(self):
         return self.offloaded_tasks
 
     def get_node_by_name(self, name: str) -> Node:
-        node = next((k for k in self.knapsacks if k.name == name), None)
+        node = next((k[1] for k in self.knapsacks if k[1].name == name), None)
         if node is None:
             raise Exception(f"Node with name {name} not found")
         return node
     
     def allocate(self, node: Node, task: Task):
-        self.knapsacks.remove(node)
         node.allocate_task(task)
-        self.knapsacks.add(node)
         for k in self.knapsacks:
             logging.info(f"{k.name} - {k.remaining_capacity()}")
 
     def release(self, node: Node, task: Task):
-        self.knapsacks.remove(node)
         node.release_task(task)
-        self.knapsacks.add(node)
         for k in self.knapsacks:
             logging.info(f"{k.name} - {k.remaining_capacity()}")
-
+    
     def is_admissable(self, task: Task) -> bool:
-        overall_free_capacity = [sum(t) for t in zip(*[k.remaining_capacity() for k in self.knapsacks])]
-        logging.info(f"Overall free capacity {overall_free_capacity}")
+        temp_knapsacks = []
+        overall_free_cpu = 0
+        overall_free_memory = 0
+
+        while self.knapsacks:
+            capacity, knapsack = heapq.heappop(self.knapsacks)
+
+            overall_free_cpu += knapsack.remaining_cpu_capacity
+            overall_free_memory +=  knapsack.remaining_memory_capacity
+
+            temp_knapsacks.append((capacity, knapsack))
+
+        # Add all knapsacks back to the heap
+        for item in temp_knapsacks:
+            heapq.heappush(self.knapsacks, item)
+        logging.info(f"Overall free capacity {(overall_free_cpu, overall_free_memory)}")
         logging.info(f"Task: CPU {task.cpu_requirement} Memory {task.memory_requirement}")
-        return task.cpu_requirement <= overall_free_capacity[0] and task.memory_requirement <= overall_free_capacity[1]
+        return task.cpu_requirement <= overall_free_cpu and task.memory_requirement <= overall_free_memory
+
+    def return_to_heap(self, nodes: list[tuple[float, Node]]):
+        for item in nodes:
+            heapq.heappush(self.knapsacks, item)
 
     def solve(self, task: Task) -> (str, list[tuple[Task, Node]]):
         tasks_to_reschedule: list[tuple[Task, Node]] = []
-        logging.info(self.knapsacks)
-        knapsacks = self.find_applicable(task)
-        logging.info(len(knapsacks))
-        if len(knapsacks) > 0:
-            name = knapsacks[0].name
-            logging.info(name)
-            self.allocate(knapsacks[0], task)
-            return (name, tasks_to_reschedule)
+        suitable_node = self.find_applicable(task)
+
+        if suitable_node is not None:
+            suitable_node.allocate_task(task)
+            self.update_heap()
+            return (suitable_node.name, tasks_to_reschedule)
+        
         else:
-            colored_knapsacks = self.get_by_color(task.color)
             allocated = False
             choosen_node: Optional[Node] = None
-            for k in colored_knapsacks:
-                for t in [x for x in iter(k.allocated_tasks)]:
-                    for n in [x for x in self.knapsacks if x != k and t.color in x.colors]:
-                        if n.can_allocate(t):
-                            self.allocate(n, t)
-                            tasks_to_reschedule.append((t, n))
-                            self.release(k, t)
-                            break                                      
-    
-                    applicable_nodes = self.find_applicable(task)
-                    if (len(applicable_nodes) > 0):
-                        allocated = True
-                        break
-                if allocated:
-                    choosen_node = k
-                    break
-            if allocated and choosen_node is not None:
+            searched_knapsacks: list[tuple[float, Node]] = []
+
+            temp_knapsacks = [(self.calculate_capacity(n[1]), n[1]) for n in self.knapsacks]
+            heapq.heapify(temp_knapsacks)
+
+            while self.knapsacks and not choosen_node:
+                capacity, knapsack = heapq.heappop(self.knapsacks)
+                if task.color in knapsack.colors:
+                    for t in iter(knapsack.allocated_tasks):
+                        visited_knapsacks: list[tuple[float, Node]] = []
+                        found = False
+                        while temp_knapsacks and not found:
+                            c, k = heapq.heappop(temp_knapsacks)
+                            if k != knapsack and t.color in k.colors:
+                                if k.can_allocate(t):
+                                    knapsack.release_task(t)
+                                    k.allocate_task(t)
+                                    tasks_to_reschedule.append((t, k))
+                                    found = True
+                            visited_knapsacks.append((c,k))
+                        
+                        for item in visited_knapsacks:
+                            heapq.heappush(temp_knapsacks, item)
+                        self.update_heap()
+
+                        applicable = self.find_applicable(task)
+                        if (applicable is not None):
+                            allocated = True
+                            choosen_node = applicable
+                            break
+                searched_knapsacks.append((capacity, knapsack))
+            self.return_to_heap(searched_knapsacks)        
+            if choosen_node is not None:
                 self.allocate(choosen_node, task)
                 return (choosen_node.name, tasks_to_reschedule)
             elif allocated and choosen_node is None:
@@ -173,50 +213,77 @@ class FRICO:
                 tasks: list[Task] = []
                 s_allocated = False
                 allocated_node = ''
-                for k in colored_knapsacks:
-                    tasks = []
-                    cummulative_cpu = 0
-                    cummulatice_memory = 0
-                    has_enough_space = False
-                    for t in iter(k.allocated_tasks):
-                        if t.objective_value() <= task.objective_value():
-                            tasks.append(t)
-                            cummulative_cpu += t.cpu_requirement
-                            cummulatice_memory += t.memory_requirement
-                        if cummulative_cpu >= task.cpu_requirement and cummulatice_memory >= task.memory_requirement:
-                            # there are already enough tasks to relax node N in favor of task T
-                            has_enough_space = True
+                s_searched_knapsacks : list[tuple[float, Node]] = []
+                while self.knapsacks and not s_allocated:
+                    capacity, knapsack = heapq.heappop(self.knapsacks)
+                    if task.color in knapsack.colors:
+                        tasks = []
+                        cummulative_cpu = 0
+                        cummulatice_memory = 0
+                        has_enough_space = False
+                        for t in iter(knapsack.allocated_tasks):
+                            if t.objective_value() <= self.calculate_potential_objective(task, knapsack.cpu_capacity, knapsack.memory_capacity):
+                                tasks.append(t)
+                                cummulative_cpu += t.cpu_requirement
+                                cummulatice_memory += t.memory_requirement
+                            if cummulative_cpu >= task.cpu_requirement and cummulatice_memory >= task.memory_requirement:
+                                # there are already enough tasks to relax node N in favor of task T
+                                has_enough_space = True
+                                break
+                            if len(tasks) == self.realloc_threshold:
+                                break
+                        if has_enough_space:
+                            # here we know that all tasks in the list must be offloaded in order to relax node N for task T
+                            for t in tasks:
+                                self.release(k, t)
+                            self.allocate(k, task)
+                            s_allocated = True
+                            allocated_node = k.name
                             break
-                        if len(tasks) == self.realloc_threshold:
-                            break
-                    if has_enough_space:
-                        # here we know that all tasks in the list must be offloaded in order to relax node N for task T
-                        for t in tasks:
-                            self.release(k, t)
-                        self.allocate(k, task)
-                        s_allocated = True
-                        allocated_node = k.name
-                        break
+                    s_searched_knapsacks.append((capacity, knapsack))
+                
+                self.return_to_heap(s_searched_knapsacks)
+                self.update_heap()
                 if s_allocated:
                     for t in tasks:
-                        cks = self.get_by_color(t.color)
-                        if any(k.can_allocate(t) for k in cks):
-                            s_colored_knapsacks = list(filter(lambda k: k.can_allocate(t), cks))
-                            self.allocate(s_colored_knapsacks[0], t)
-                            tasks_to_reschedule.append((t, s_colored_knapsacks[0]))
-                        else:
+                        l_searched_knapsacks: list[tuple[float, Node]] = []
+                        task_allocated = False
+                        while self.knapsacks and not task_allocated:
+                            capacity, knapsack = heapq.heappop(self.knapsacks)
+                            if task.color in knapsack.colors and knapsack.can_allocate(t):
+                                knapsack.allocate_task(t)
+                                task_allocated = True
+                                self.update_heap()
+                                tasks_to_reschedule.append((t, knapsack))
+                            l_searched_knapsacks.append((capacity, knapsack))
+                        
+                        if not task_allocated:
                             self.offloaded_tasks += 1
+                        
+                        self.return_to_heap(l_searched_knapsacks)
+                        self.update_heap()    
                 return (allocated_node, tasks_to_reschedule)
-
-    def find_applicable(self, task: Task) -> list[Node]:
-        for k in self.knapsacks:
-            logging.info(f"{task.color} {k.colors} {task.color in k.colors}")
-            logging.info(f"{task.cpu_requirement} {k.remaining_capacity()[0]} {k.remaining_capacity()[0] >= task.cpu_requirement}")
-            logging.info(f"{task.memory_requirement} {k.remaining_capacity()[1]} {k.remaining_capacity()[1] >= task.memory_requirement}")
-        return [k for k in self.knapsacks if task.color in k.colors and k.remaining_capacity()[0] >= task.cpu_requirement and k.remaining_capacity()[1] >= task.memory_requirement]
     
-    def get_by_color(self, color: str):
-        return [x for x in self.knapsacks if color in x.colors]
+    def calculate_potential_objective(self, task: Task, cpu_capacity: int, memory_capacity: int):
+        return task.priority.value / ((((task.cpu_requirement / cpu_capacity) + (task.memory_requirement / memory_capacity)) / 2))
+    
+    def find_applicable(self, task: Task) -> Optional[Node]:
+        best_knapsack = None
+        temp_knapsacks = []
+
+        while self.knapsacks and not best_knapsack:
+            capacity, knapsack = heapq.heappop(self.knapsacks)
+
+            if knapsack.can_allocate(task) and task.color in knapsack.colors:
+                best_knapsack = knapsack
+
+            temp_knapsacks.append((capacity, knapsack))
+
+        # Add all knapsacks back to the heap
+        for item in temp_knapsacks:
+            heapq.heappush(self.knapsacks, item)
+
+        return best_knapsack
     
 def handle_pod(solver: FRICO, task_id: int, node_name: str):
     try:

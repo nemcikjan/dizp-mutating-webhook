@@ -3,13 +3,14 @@ from frico import Node, FRICO, handle_pod
 import logging
 from threading import Event
 import time
+from sortedcontainers import SortedList
 
-# config.load_incluster_config()
-config.load_config()
+config.load_incluster_config()
+# config.load_config()
 
 def init_nodes() -> list[Node]:
     # Configs can be set in Configuration class directly or using helper utility
-    config.load_incluster_config()
+    # config.load_incluster_config()
 
     v1 = client.CoreV1Api()
     ret = v1.list_node()
@@ -20,22 +21,13 @@ def init_nodes() -> list[Node]:
     
     return nodes
 
-# def handle_pod(solver: FRICO, task_id: int, node_name: str):
-#     try:
-#         node = solver.get_node_by_name(node_name)
-#         task = node.get_task_by_id(task_id)
-#         logging.info(f"Releasing task {task.id} from {node.name}")
-#         solver.release(node, task)
-#     except Exception as e:
-#         print(e)
-
 def delete_pod(pod_name: str, namespace: str):
-    config.load_incluster_config()  # or use load_incluster_config() if running inside a cluster
+    # config.load_incluster_config()  # or use load_incluster_config() if running inside a cluster
 
     v1 = client.CoreV1Api()
     try:
-        response = v1.delete_namespaced_pod(name=pod_name, namespace=namespace)
-        print(f"Pod {pod_name} deleted. Status: {response.status}")
+        v1.delete_namespaced_pod(name=pod_name, namespace=namespace, body=client.V1DeleteOptions(grace_period_seconds=0))
+        logging.info(f"Pod {pod_name} deleted")
     except client.exceptions.ApiException as e:
         print(f"Exception when deleting pod: {e}")
     pass
@@ -44,7 +36,7 @@ def reschedule(pod_name: str, namespace: str, new_node_name: str):
     v1 = client.CoreV1Api()
     try:
         pod = v1.read_namespaced_pod(name=pod_name, namespace=namespace)
-        thr = v1.delete_namespaced_pod(name=pod_name, namespace=namespace, async_req=True)
+        thr = v1.delete_namespaced_pod(name=pod_name, namespace=namespace, async_req=True, body=client.V1DeleteOptions(grace_period_seconds=0))
         new_pod = client.V1Pod()
         new_labels = pod.metadata.labels
         new_labels["frico_skip"] = "true"
@@ -54,14 +46,14 @@ def reschedule(pod_name: str, namespace: str, new_node_name: str):
         new_exec_time = exec_time - (int(time.time()) - arrival_time)
         new_pod.spec = client.V1PodSpec(node_name=new_node_name, restart_policy="Never", containers=[client.V1Container(name=pod.spec.containers[0].name, image=pod.spec.containers[0].image, command=pod.spec.containers[0].command, args=["-c", f"sleep {new_exec_time} && exit 0"], resources=pod.spec.containers[0].resources)])
         response = thr.get()
-        print(f"Pod {pod_name} deleted. Status: {response.status}")
+        logging.info(f"Pod {pod_name} deleted. Status: {response.status}")
         response = v1.create_namespaced_pod(namespace=namespace, body=new_pod)
-        print(f"Pod {pod_name} create. Status: {response.status}")
+        logging.info(f"Pod {pod_name} create. Status: {response.status}")
     except client.exceptions.ApiException as e:
-        print(f"Exception when deleting pod: {e}")
+        logging.warning(f"Exception when deleting pod: {e}")
 
 def watch_pods(solver: FRICO, stop_signal: Event):
-    config.load_incluster_config()  # or config.load_incluster_config() if you are running inside a cluster
+    # config.load_incluster_config()  # or config.load_incluster_config() if you are running inside a cluster
 
     # Create a client for the CoreV1 API
     corev1 = client.CoreV1Api()
@@ -70,19 +62,27 @@ def watch_pods(solver: FRICO, stop_signal: Event):
     w = watch.Watch()
     while not stop_signal.is_set():
         logging.info("Starting watching for pods")
+        deleted_pods = SortedList()
         # Watch for events related to Pods
         for event in w.stream(corev1.list_namespaced_pod, "tasks"):
             pod = event['object']
             # job_status = job.status.succeeded
             pod_status = pod.status.phase
-            logging.info(pod.metadata.labels)
-            logging.info(pod_status)
+            pod_name = pod.metadata.name
+            logging.info(f"Pod {pod_name} labels {pod.metadata.labels}")
 
-            if "frico" in pod.metadata.labels and pod_status == "Succeeded":
-                logging.info(f"Pod {pod.metadata.name} succeeded")
-                handle_pod(solver, int(pod.metadata.labels["task_id"]), pod.metadata.labels["node_name"])
-                # cleanup
-                delete_pod(pod.metadata.name, pod.metadata.namespace)
+            try:
+                if "frico" in pod.metadata.labels and pod_status == "Succeeded" and pod.metadata.name and pod.metadata.name not in deleted_pods:
+                    logging.info(f"Pod {pod.metadata.name} succeeded")
+                    handle_pod(solver, int(pod.metadata.labels["task_id"]), pod.metadata.labels["node_name"])
+                    deleted_pods.add(pod.metadata.name)
+                    # cleanup
+                    delete_pod(pod.metadata.name, pod.metadata.namespace)
+            except Exception as e:
+                logging.warning(f"Error while handling pod deletion in thread {e}")
+
+
+
     logging.info("Stopping thread")
     w.stop()
 

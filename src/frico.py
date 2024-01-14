@@ -12,14 +12,14 @@ class Priority(Enum):
     CRITICAL = 5
 
 class BaseTask(object):
-    def __init__(self, id: int, cpu_requirement: float, memory_requirement: float, color: str):
+    def __init__(self, id: str, cpu_requirement: int, memory_requirement: int, color: str):
         self.cpu_requirement = cpu_requirement
         self.memory_requirement = memory_requirement
         self.color = color
         self.id = id
 
 class Task(BaseTask):
-    def __init__(self, id: int, name: str, cpu_requirement: int, memory_requirement: int, priority: Priority, color: str):
+    def __init__(self, id: str, name: str, cpu_requirement: int, memory_requirement: int, priority: Priority, color: str):
         self.priority = priority
         self.name = name
         self.node_cpu_capacity = 0
@@ -34,8 +34,8 @@ class Task(BaseTask):
 class Node(object):
     id: int
     name: str
-    remaining_cpu_capacity: float
-    remaining_memory_capacity: float
+    remaining_cpu_capacity: int
+    remaining_memory_capacity: int
     current_value = 0
     current_objective = 0
     released_tasks = 0
@@ -55,7 +55,7 @@ class Node(object):
     def __lt__(self, other):
         return (self.id, (self.cpu_capacity - self.remaining_cpu_capacity) / self.cpu_capacity, (self.memory_capacity - self.remaining_memory_capacity) / self.memory_capacity) < (other.id, (other.cpu_capacity - other.remaining_cpu_capacity) / other.cpu_capacity, (other.memory_capacity - other.remaining_memory_capacity) / other.memory_capacity)
     
-    def remaining_capacity(self) -> tuple[float, float]:
+    def remaining_capacity(self) -> tuple[int, int]:
         return (self.remaining_cpu_capacity, self.remaining_memory_capacity)
     
     def allocate_task(self, task: Task):
@@ -64,8 +64,8 @@ class Node(object):
             task.node_cpu_capacity = self.cpu_capacity
             self.allocated_tasks.add(task)
             self.assigned_tasks += 1
-            self.remaining_cpu_capacity -= task.cpu_requirement
-            self.remaining_memory_capacity -= task.memory_requirement
+            self.remaining_cpu_capacity = int(self.remaining_cpu_capacity - task.cpu_requirement)
+            self.remaining_memory_capacity = int(self.remaining_memory_capacity - task.memory_requirement)   
             self.current_value += task.priority.value
             self.current_objective += task.objective_value()
             return True
@@ -80,8 +80,8 @@ class Node(object):
         self.allocated_tasks.remove(task)
         self.released_tasks += 1
         self.assigned_tasks -= 1
-        self.remaining_cpu_capacity += task.cpu_requirement
-        self.remaining_memory_capacity += task.memory_requirement
+        self.remaining_cpu_capacity = int(self.remaining_cpu_capacity + task.cpu_requirement)
+        self.remaining_memory_capacity = int(self.remaining_memory_capacity + task.memory_requirement)        
         self.current_value -= task.priority.value
         self.current_objective -= task.objective_value()
 
@@ -129,12 +129,15 @@ class FRICO:
     def allocate(self, node: Node, task: Task):
         node.allocate_task(task)
         for k in self.knapsacks:
-            logging.info(f"{k.name} - {k.remaining_capacity()}")
+            logging.info(f"{k[1].name} - {k[1].remaining_capacity()}")
 
     def release(self, node: Node, task: Task):
-        node.release_task(task)
+        try:
+            node.release_task(task)
+        except Exception as e:
+            logging.warning(f"Exeception occcured while releasing task {task.id} from {node.name} {e}")
         for k in self.knapsacks:
-            logging.info(f"{k.name} - {k.remaining_capacity()}")
+            logging.info(f"{k[1].name} - {k[1].remaining_capacity()} - {len(k[1].allocated_tasks)}")
     
     def is_admissable(self, task: Task) -> bool:
         temp_knapsacks = []
@@ -152,6 +155,7 @@ class FRICO:
         # Add all knapsacks back to the heap
         for item in temp_knapsacks:
             heapq.heappush(self.knapsacks, item)
+
         logging.info(f"Overall free capacity {(overall_free_cpu, overall_free_memory)}")
         logging.info(f"Task: CPU {task.cpu_requirement} Memory {task.memory_requirement}")
         return task.cpu_requirement <= overall_free_cpu and task.memory_requirement <= overall_free_memory
@@ -206,6 +210,7 @@ class FRICO:
             self.return_to_heap(searched_knapsacks)        
             if choosen_node is not None:
                 self.allocate(choosen_node, task)
+                self.update_heap()
                 return (choosen_node.name, tasks_to_reschedule)
             elif allocated and choosen_node is None:
                 raise Exception("Something gone wrong")
@@ -232,14 +237,14 @@ class FRICO:
                                 break
                             if len(tasks) == self.realloc_threshold:
                                 break
+                        
                         if has_enough_space:
                             # here we know that all tasks in the list must be offloaded in order to relax node N for task T
                             for t in tasks:
-                                self.release(k, t)
-                            self.allocate(k, task)
+                                self.release(knapsack, t)
+                            self.allocate(knapsack, task)
                             s_allocated = True
-                            allocated_node = k.name
-                            break
+                            allocated_node = knapsack.name
                     s_searched_knapsacks.append((capacity, knapsack))
                 
                 self.return_to_heap(s_searched_knapsacks)
@@ -258,6 +263,7 @@ class FRICO:
                             l_searched_knapsacks.append((capacity, knapsack))
                         
                         if not task_allocated:
+                            tasks_to_reschedule.append((t, None))
                             self.offloaded_tasks += 1
                         
                         self.return_to_heap(l_searched_knapsacks)
@@ -291,5 +297,6 @@ def handle_pod(solver: FRICO, task_id: int, node_name: str):
         task = node.get_task_by_id(task_id)
         logging.info(f"Releasing task {task.id} from {node.name}")
         solver.release(node, task)
+        solver.update_heap()
     except Exception as e:
-        print(e)
+        logging.warning(f"Handling pod failed {e}")

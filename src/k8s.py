@@ -17,7 +17,7 @@ def init_nodes() -> list[Node]:
     nodes: list[Node] = []
     for i, n in enumerate(ret.items):
         logging.info(f"Adding node {n.metadata.name} CPU capacity: {parse_cpu_to_millicores(n.status.capacity["cpu"])} Memory capacity {parse_memory_to_bytes(n.status.capacity["memory"])} Colors: {str.split(n.metadata.annotations["colors"], sep=",")}")
-        nodes.append(Node(i, n.metadata.name, parse_cpu_to_millicores(n.status.capacity["cpu"]), parse_memory_to_bytes(n.status.capacity["memory"]), str.split(n.metadata.annotations["colors"], sep=",")))
+        nodes.append(Node(i, n.metadata.name, .95 * parse_cpu_to_millicores(n.status.capacity["cpu"]), .95 * parse_memory_to_bytes(n.status.capacity["memory"]), str.split(n.metadata.annotations["colors"], sep=",")))
     
     return nodes
 
@@ -28,29 +28,30 @@ def delete_pod(pod_name: str, namespace: str):
     try:
         v1.delete_namespaced_pod(name=pod_name, namespace=namespace, body=client.V1DeleteOptions(grace_period_seconds=0))
         logging.info(f"Pod {pod_name} deleted")
-    except client.exceptions.ApiException as e:
-        print(f"Exception when deleting pod: {e}")
-    pass
+    except client.ApiException as e:
+        logging.warning(f"Exception when deleting pod: {e}")
 
 def reschedule(pod_name: str, namespace: str, new_node_name: str):
     v1 = client.CoreV1Api()
     try:
+        logging.info(f"Rescheduling task {pod_name}")
         pod = v1.read_namespaced_pod(name=pod_name, namespace=namespace)
-        thr = v1.delete_namespaced_pod(name=pod_name, namespace=namespace, async_req=True, body=client.V1DeleteOptions(grace_period_seconds=0))
+        thr = v1.delete_namespaced_pod(name=pod_name, namespace=namespace,body=client.V1DeleteOptions(grace_period_seconds=0))
         new_pod = client.V1Pod()
         new_labels = pod.metadata.labels
+        new_labels["node_name"] = new_node_name
         new_labels["frico_skip"] = "true"
         new_pod.metadata = client.V1ObjectMeta(name=pod.metadata.name, labels=new_labels, annotations=pod.metadata.annotations)
         arrival_time = int(pod.metadata.labels["arrival_time"])
-        exec_time = int(pod.metadata.labels["exec_time"])
+        # 2 is k8s overhead :)
+        exec_time = int(pod.metadata.labels["exec_time"]) * 2
         new_exec_time = exec_time - (int(time.time()) - arrival_time)
-        new_pod.spec = client.V1PodSpec(node_name=new_node_name, restart_policy="Never", containers=[client.V1Container(name=pod.spec.containers[0].name, image=pod.spec.containers[0].image, command=pod.spec.containers[0].command, args=["-c", f"sleep {new_exec_time} && exit 0"], resources=pod.spec.containers[0].resources)])
-        response = thr.get()
-        logging.info(f"Pod {pod_name} deleted. Status: {response.status}")
+        new_pod.spec = client.V1PodSpec(node_selector={"name": new_node_name}, restart_policy="Never", containers=[client.V1Container(name=pod.spec.containers[0].name, image=pod.spec.containers[0].image, command=pod.spec.containers[0].command, args=["-c", f"sleep {new_exec_time if new_exec_time > 0 else 1} && exit 0"], resources=pod.spec.containers[0].resources)])
+        logging.info(f"Pod {pod_name} deleted")
         response = v1.create_namespaced_pod(namespace=namespace, body=new_pod)
-        logging.info(f"Pod {pod_name} create. Status: {response.status}")
-    except client.exceptions.ApiException as e:
-        logging.warning(f"Exception when deleting pod: {e}")
+        logging.info(f"Pod {pod_name} create")
+    except client.ApiException as e:
+        logging.warning(f"Exception when rescheduling pod: {e}")
 
 def watch_pods(solver: FRICO, stop_signal: Event):
     # config.load_incluster_config()  # or config.load_incluster_config() if you are running inside a cluster
@@ -62,25 +63,26 @@ def watch_pods(solver: FRICO, stop_signal: Event):
     w = watch.Watch()
     while not stop_signal.is_set():
         logging.info("Starting watching for pods")
-        deleted_pods = SortedList()
         # Watch for events related to Pods
+
         for event in w.stream(corev1.list_namespaced_pod, "tasks"):
             pod = event['object']
             # job_status = job.status.succeeded
             pod_status = pod.status.phase
-            pod_name = pod.metadata.name
-            logging.info(f"Pod {pod_name} labels {pod.metadata.labels}")
+            # logging.info(f"Pod {pod_name} labels {pod.metadata.labels}")
+
+            if stop_signal.is_set():
+                break
 
             try:
-                if "frico" in pod.metadata.labels and pod_status == "Succeeded" and pod.metadata.name and pod.metadata.name not in deleted_pods:
+                if "frico" in pod.metadata.labels and pod_status == "Succeeded":
                     logging.info(f"Pod {pod.metadata.name} succeeded")
-                    handle_pod(solver, int(pod.metadata.labels["task_id"]), pod.metadata.labels["node_name"])
-                    deleted_pods.add(pod.metadata.name)
+                    handle_pod(solver, pod.metadata.labels["task_id"], pod.metadata.labels["node_name"])
+                    # deleted_pods.add(pod.metadata.name)
                     # cleanup
                     delete_pod(pod.metadata.name, pod.metadata.namespace)
             except Exception as e:
                 logging.warning(f"Error while handling pod deletion in thread {e}")
-
 
 
     logging.info("Stopping thread")
@@ -107,7 +109,9 @@ def parse_memory_to_bytes(mem_str):
         'Gi': 1024**3,
         'Ti': 1024**4,
         'Pi': 1024**5,
-        'Ei': 1024**6
+        'Ei': 1024**6,
+        'k': 1000,
+        'M': 1000**2
     }
     if mem_str[-2:] in unit_multipliers:
         return int(float(mem_str[:-2]) * unit_multipliers[mem_str[-2:]])

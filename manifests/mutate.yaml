@@ -5,6 +5,16 @@ metadata:
 webhooks:
   - name: frico-webhook.frico.svc
     sideEffects: None
+    timeoutSeconds: 30
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: tasks
+    objectSelector:
+      matchExpressions:
+        - key: v2x
+          operator: Exists
+        - key: frico_skip
+          operator: DoesNotExist
     admissionReviewVersions:
       - v1
     rules:

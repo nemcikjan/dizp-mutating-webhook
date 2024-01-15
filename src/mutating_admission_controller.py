@@ -26,8 +26,9 @@ total_tasks_counter = Counter('total_tasks', 'Total tasks')
 reallocated_tasks_counter = Counter('reallocated_tasks', 'Realocated tasks')
 objective_value_gauge = Gauge('objective_value', 'Current objective value')
 offloaded_tasks_counter = Counter('offloaded_tasks', 'Offloaded tasks')
-processing_pod_time = Gauge('pod_processing_time', 'Pod processing time', ['pod'])
-priority_histogram = Histogram('priority', 'Priorities', ['pod'])
+processing_pod_time = Gauge('pod_processing_time', 'Task processing time', ['pod'])
+# priority_histogram = Histogram('priority', 'Priorities', ['pod'])
+priority_counter = Gauge('priority', 'Task priority', ['pod', 'priority'])
 
 admission_controller = Flask(__name__)
 
@@ -81,20 +82,24 @@ def process_pod():
 
             node_name = ''
             shit_to_be_done: list[tuple[Task, Node]] = []
+            start_time = time.perf_counter()
             if solver.is_admissable(task):
                 node_name, shit_to_be_done = solver.solve(task)
-            allowed = node_name != ''
+            end_time = time.perf_counter()
 
+            allowed = node_name != ''
+            processing_pod_time.labels(pod=pod_id).set(end_time - start_time)
             admission_controller.logger.info(f"Setting results for pod {pod_id}")
             if allowed:
                 allocated_tasks_counter.labels(node=node_name).inc()
                 objective_value_gauge.inc(task.objective_value())
-                priority_histogram.labels(pod=pod_id).observe(task.priority.value)
+                priority_counter.labels(pod=pod_id, priority=str(task.priority.value)).inc()
+
                 for shit, to_shit in shit_to_be_done:
                     if to_shit is None:
                         delete_pod(shit.name, "tasks")
                         offloaded_tasks_counter.inc()
-                        priority_histogram.remove(pod=shit.name)
+                        priority_counter.labels(pod=pod_id, priority=str(task.priority.value)).dec()
                     else:
                         reschedule(shit.name, "tasks", to_shit.name)
                         reallocated_tasks_counter.inc()
@@ -179,11 +184,9 @@ def deployment_webhook_mutate():
     pod_id = pod_metadata["name"]
     request_events[pod_id] = threading.Event()
     pod_queue.put((pod_id, pod))
-    start_time = time.perf_counter()
-    request_events[pod_id].wait()
-    end_time = time.perf_counter()
 
-    processing_pod_time.labels(pod=pod_id).set(end_time - start_time)
+    request_events[pod_id].wait()
+
 
     allowed, message, patches = request_results.pop(pod_id)
 

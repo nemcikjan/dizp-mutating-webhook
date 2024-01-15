@@ -3,7 +3,7 @@ import base64
 import jsonpatch
 from frico import FRICO, Task, Node, Priority
 from prometheus_flask_exporter import PrometheusMetrics
-from prometheus_client import Counter, Gauge
+from prometheus_client import Counter, Gauge, Histogram
 from k8s import init_nodes, watch_pods, parse_cpu_to_millicores, parse_memory_to_bytes, reschedule, delete_pod
 import os
 import threading
@@ -20,15 +20,14 @@ request_results: dict[str, tuple[bool, str, jsonpatch.JsonPatch]] = {}
 
 pod_queue = queue.Queue()
 
-allocated_tasks_counter = Counter('allocated_tasks', 'Allocated tasks per node')
+allocated_tasks_counter = Counter('allocated_tasks', 'Allocated tasks per node', ['node'])
 unallocated_tasks_counter = Counter('unallocated_tasks', 'Unallocated tasks')
 total_tasks_counter = Counter('total_tasks', 'Total tasks')
 reallocated_tasks_counter = Counter('reallocated_tasks', 'Realocated tasks')
 objective_value_gauge = Gauge('objective_value', 'Current objective value')
 offloaded_tasks_counter = Counter('offloaded_tasks', 'Offloaded tasks')
-
-offloaded_tasks = 0
-tasks_counter = 0
+processing_pod_time = Gauge('pod_processing_time', 'Pod processing time', ['pod'])
+priority_histogram = Histogram('priority', 'Priorities', ['pod'])
 
 admission_controller = Flask(__name__)
 
@@ -51,7 +50,6 @@ thread = threading.Thread(target=watch_pods, args=(solver, stop_event), daemon=T
 thread.start()
 
 def process_pod():
-    global offloaded_tasks
     while not stop_event.is_set():
         if stop_event.is_set():
             break
@@ -89,10 +87,14 @@ def process_pod():
 
             admission_controller.logger.info(f"Setting results for pod {pod_id}")
             if allowed:
-                allocated_tasks_counter.inc(exemplar={"node": node_name})
+                allocated_tasks_counter.labels(node=node_name).inc()
+                objective_value_gauge.inc(task.objective_value())
+                priority_histogram.labels(pod=pod_id).observe(task.priority.value)
                 for shit, to_shit in shit_to_be_done:
                     if to_shit is None:
                         delete_pod(shit.name, "tasks")
+                        offloaded_tasks_counter.inc()
+                        priority_histogram.remove(pod=shit.name)
                     else:
                         reschedule(shit.name, "tasks", to_shit.name)
                         reallocated_tasks_counter.inc()
@@ -100,11 +102,9 @@ def process_pod():
             else:
                 unallocated_tasks_counter.inc()
 
-            if solver.offloaded_tasks > offloaded_tasks:
-                offloaded_tasks_counter.inc(solver.offloaded_tasks - offloaded_tasks)
-                offloaded_tasks = solver.offloaded_tasks
-
-            objective_value_gauge.set(solver.get_current_objective())
+            # if solver.offloaded_tasks > offloaded_tasks:
+            #     offloaded_tasks_counter.inc(solver.offloaded_tasks - offloaded_tasks)
+            #     offloaded_tasks = solver.offloaded_tasks
 
             patches = [
                 {
@@ -173,15 +173,17 @@ def health():
 @admission_controller.route('/mutate', methods=['POST'])
 def deployment_webhook_mutate():
     request_info = request.get_json()
-    global tasks_counter, offloaded_tasks, solver
     pod = request_info["request"]["object"]
     uid = request_info["request"]["uid"]
     pod_metadata = pod["metadata"]
     pod_id = pod_metadata["name"]
     request_events[pod_id] = threading.Event()
     pod_queue.put((pod_id, pod))
-
+    start_time = time.perf_counter()
     request_events[pod_id].wait()
+    end_time = time.perf_counter()
+
+    processing_pod_time.labels(pod=pod_id).set(end_time - start_time)
 
     allowed, message, patches = request_results.pop(pod_id)
 

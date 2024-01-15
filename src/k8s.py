@@ -16,7 +16,7 @@ def init_nodes() -> list[Node]:
     ret = v1.list_node()
     nodes: list[Node] = []
     for i, n in enumerate(ret.items):
-        logging.info(f"Adding node {n.metadata.name} CPU capacity: {parse_cpu_to_millicores(n.status.capacity["cpu"])} Memory capacity {parse_memory_to_bytes(n.status.capacity["memory"])} Colors: {str.split(n.metadata.annotations["colors"], sep=",")}")
+        logging.info(f"Adding node {n.metadata.name} CPU capacity: {int(.95 * parse_cpu_to_millicores(n.status.capacity["cpu"]))} Memory capacity {int(.95 * parse_memory_to_bytes(n.status.capacity["memory"]))} Colors: {str.split(n.metadata.annotations["colors"], sep=",")}")
         nodes.append(Node(i, n.metadata.name, .95 * parse_cpu_to_millicores(n.status.capacity["cpu"]), .95 * parse_memory_to_bytes(n.status.capacity["memory"]), str.split(n.metadata.annotations["colors"], sep=",")))
     
     return nodes

@@ -23,6 +23,7 @@ pod_queue = queue.Queue()
 allocated_tasks_counter = Counter('allocated_tasks', 'Allocated tasks per node')
 unallocated_tasks_counter = Counter('unallocated_tasks', 'Unallocated tasks')
 total_tasks_counter = Counter('total_tasks', 'Total tasks')
+reallocated_tasks_counter = Counter('reallocated_tasks', 'Realocated tasks')
 objective_value_gauge = Gauge('objective_value', 'Current objective value')
 offloaded_tasks_counter = Counter('offloaded_tasks', 'Offloaded tasks')
 
@@ -94,6 +95,7 @@ def process_pod():
                         delete_pod(shit.name, "tasks")
                     else:
                         reschedule(shit.name, "tasks", to_shit.name)
+                        reallocated_tasks_counter.inc()
                     
             else:
                 unallocated_tasks_counter.inc()

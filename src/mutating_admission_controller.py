@@ -26,7 +26,8 @@ total_tasks_counter = Counter('total_tasks', 'Total tasks')
 reallocated_tasks_counter = Counter('reallocated_tasks', 'Realocated tasks')
 objective_value_gauge = Gauge('objective_value', 'Current objective value')
 offloaded_tasks_counter = Counter('offloaded_tasks', 'Offloaded tasks')
-processing_pod_time = Gauge('pod_processing_time', 'Task processing time', ['pod'])
+processing_pod_time = Gauge('pod_processing_time', 'Task allocation time', ['pod'])
+kube_processing_pod_time = Gauge('kube_pod_processing_time', 'K8S task processing time', ['pod'])
 # priority_histogram = Histogram('priority', 'Priorities', ['pod'])
 priority_counter = Gauge('priority', 'Task priority', ['pod', 'priority'])
 
@@ -82,13 +83,13 @@ def process_pod():
 
             node_name = ''
             shit_to_be_done: list[tuple[Task, Node]] = []
-            start_time = time.perf_counter()
+            frico_start_time = time.perf_counter()
             if solver.is_admissable(task):
                 node_name, shit_to_be_done = solver.solve(task)
-            end_time = time.perf_counter()
+            frico_end_time = time.perf_counter()
 
             allowed = node_name != ''
-            processing_pod_time.labels(pod=pod_id).set(end_time - start_time)
+            processing_pod_time.labels(pod=pod_id).set(frico_end_time - frico_start_time)
             admission_controller.logger.info(f"Setting results for pod {pod_id}")
             if allowed:
                 allocated_tasks_counter.labels(node=node_name).inc()
@@ -184,9 +185,10 @@ def deployment_webhook_mutate():
     pod_id = pod_metadata["name"]
     request_events[pod_id] = threading.Event()
     pod_queue.put((pod_id, pod))
-
+    kube_processing_time_start = time.perf_counter()
     request_events[pod_id].wait()
-
+    kube_processing_time_end = time.perf_counter()
+    kube_processing_pod_time.labels(pod=pod_id).set(kube_processing_time_end - kube_processing_time_start)
 
     allowed, message, patches = request_results.pop(pod_id)
 

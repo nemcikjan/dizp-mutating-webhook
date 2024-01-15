@@ -291,7 +291,7 @@ class FRICO:
 
         return best_knapsack
     
-def handle_pod(solver: FRICO, task_id: int, node_name: str):
+def handle_pod(solver: FRICO, task_id: str, node_name: str):
     try:
         node = solver.get_node_by_name(node_name)
         task = node.get_task_by_id(task_id)

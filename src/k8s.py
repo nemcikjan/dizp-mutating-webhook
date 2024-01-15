@@ -36,7 +36,10 @@ def reschedule(pod_name: str, namespace: str, new_node_name: str):
     v1 = client.CoreV1Api()
     try:
         logging.info(f"Rescheduling task {pod_name}")
-        pod = v1.read_namespaced_pod(name=pod_name, namespace=namespace)
+        try:
+            pod = v1.read_namespaced_pod(name=pod_name, namespace=namespace)
+        except Exception as e:
+            logging.warning(f"Got you fucker {pod_name}")
         try:
             thr = v1.delete_namespaced_pod(name=pod_name, namespace=namespace,body=client.V1DeleteOptions(grace_period_seconds=0))
             logging.info(f"Pod {pod_name} deleted due rescheduling")

@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
 import base64
 import jsonpatch
-from frico import FRICO, Task, Node, Priority
+from frico import FRICO, Task, Node, Priority, handle_pod
 from prometheus_flask_exporter import PrometheusMetrics
 from prometheus_client import Counter, Gauge, Histogram
 from k8s import init_nodes, watch_pods, parse_cpu_to_millicores, parse_memory_to_bytes, reschedule, delete_pod
@@ -102,7 +102,11 @@ def process_pod():
                         offloaded_tasks_counter.inc()
                         priority_counter.labels(pod=pod_id, priority=str(task.priority.value)).dec()
                     else:
-                        reschedule(shit.name, "tasks", to_shit.name)
+                        try:
+                            reschedule(shit.name, "tasks", to_shit.name)
+                        except:
+                            logging.info("Removing pod {shit.name} from {to_shit.name}. Finished before reschedeling")
+                            solver.release(shit, to_shit)
                         reallocated_tasks_counter.inc()
                     
             else:

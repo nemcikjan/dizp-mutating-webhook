@@ -104,7 +104,10 @@ def process_pod():
 
                 for shit, to_shit in shit_to_be_done:
                     if to_shit is None:
-                        delete_pod(shit.name, "tasks")
+                        try:
+                            delete_pod(shit.name, "tasks")
+                        except Exception as e:
+                            logging.warning(f"There was an issue deleting pod during offloading. Probably finished first")
                         offloaded_tasks_counter.labels(simulation=SIMULATION_NAME).inc()
                         priority_counter.labels(simulation=SIMULATION_NAME,pod=pod_id, priority=str(task.priority.value)).dec()
                     else:
@@ -117,6 +120,7 @@ def process_pod():
                     
             else:
                 unallocated_tasks_counter.labels(simulation=SIMULATION_NAME).inc()
+                priority_counter.labels(simulation=SIMULATION_NAME, pod=pod_id, priority=str(task.priority.value)).set(0)
 
             # if solver.offloaded_tasks > offloaded_tasks:
             #     offloaded_tasks_counter.inc(solver.offloaded_tasks - offloaded_tasks)

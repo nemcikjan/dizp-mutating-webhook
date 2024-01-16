@@ -45,7 +45,7 @@ spec:
               value: "4"
             - name: SIMULATION_NAME
               value: Barnim
-          image: ghcr.io/nemcikjan/dizp-mutating-webhook:v20240116-fad92d1
+          image: ghcr.io/nemcikjan/dizp-mutating-webhook:v20240116-773900e
           imagePullPolicy: IfNotPresent
           args:
             - "--bind=0.0.0.0:443"

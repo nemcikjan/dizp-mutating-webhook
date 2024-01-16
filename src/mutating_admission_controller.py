@@ -30,6 +30,7 @@ processing_pod_time = Gauge('pod_processing_time', 'Task allocation time', ['pod
 kube_processing_pod_time = Gauge('kube_pod_processing_time', 'K8S task processing time', ['pod', 'simulation'])
 # priority_histogram = Histogram('priority', 'Priorities', ['pod'])
 priority_counter = Gauge('priority', 'Task priority', ['pod', 'priority', 'simulation'])
+unallocated_priority_counter = Gauge('unallocated_priorities', 'Unallocated task priority', ['priority', 'simulation'])
 
 admission_controller = Flask(__name__)
 
@@ -120,7 +121,7 @@ def process_pod():
                     
             else:
                 unallocated_tasks_counter.labels(simulation=SIMULATION_NAME).inc()
-                priority_counter.labels(simulation=SIMULATION_NAME, pod=pod_id, priority=str(task.priority.value)).set(0)
+                unallocated_priority_counter.labels(simulation=SIMULATION_NAME, priority=str(task.priority.value)).inc()
 
             # if solver.offloaded_tasks > offloaded_tasks:
             #     offloaded_tasks_counter.inc(solver.offloaded_tasks - offloaded_tasks)

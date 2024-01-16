@@ -215,6 +215,7 @@ class FRICO:
             elif allocated and choosen_node is None:
                 raise Exception("Something gone wrong")
             else: 
+                # tasks = SortedList()
                 tasks: list[Task] = []
                 s_allocated = False
                 allocated_node = ''
@@ -229,6 +230,7 @@ class FRICO:
                         for t in iter(knapsack.allocated_tasks):
                             if t.objective_value() <= self.calculate_potential_objective(task, knapsack.cpu_capacity, knapsack.memory_capacity):
                                 tasks.append(t)
+                                # tasks.add(t)
                                 cummulative_cpu += t.cpu_requirement
                                 cummulatice_memory += t.memory_requirement
                             if cummulative_cpu >= task.cpu_requirement and cummulatice_memory >= task.memory_requirement:

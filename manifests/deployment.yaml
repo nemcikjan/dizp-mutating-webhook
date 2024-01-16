@@ -43,7 +43,9 @@ spec:
           env:
             - name: MAX_REALLOC
               value: "4"
-          image: ghcr.io/nemcikjan/dizp-mutating-webhook:v20240115-624c7bd
+            - name: SIMULATION_NAME
+              value: Barnim
+          image: ghcr.io/nemcikjan/dizp-mutating-webhook:v20240116-fad92d1
           imagePullPolicy: IfNotPresent
           args:
             - "--bind=0.0.0.0:443"

@@ -20,16 +20,16 @@ request_results: dict[str, tuple[bool, str, jsonpatch.JsonPatch]] = {}
 
 pod_queue = queue.Queue()
 
-allocated_tasks_counter = Counter('allocated_tasks', 'Allocated tasks per node', ['node'])
-unallocated_tasks_counter = Counter('unallocated_tasks', 'Unallocated tasks')
-total_tasks_counter = Counter('total_tasks', 'Total tasks')
-reallocated_tasks_counter = Counter('reallocated_tasks', 'Realocated tasks')
-objective_value_gauge = Gauge('objective_value', 'Current objective value')
-offloaded_tasks_counter = Counter('offloaded_tasks', 'Offloaded tasks')
-processing_pod_time = Gauge('pod_processing_time', 'Task allocation time', ['pod'])
-kube_processing_pod_time = Gauge('kube_pod_processing_time', 'K8S task processing time', ['pod'])
+allocated_tasks_counter = Counter('allocated_tasks', 'Allocated tasks per node', ['node', 'simulation'])
+unallocated_tasks_counter = Counter('unallocated_tasks', 'Unallocated tasks', ['simulation'])
+total_tasks_counter = Counter('total_tasks', 'Total tasks', ['simulation'])
+reallocated_tasks_counter = Counter('reallocated_tasks', 'Realocated tasks', ['simulation'])
+objective_value_gauge = Gauge('objective_value', 'Current objective value', ['simulation'])
+offloaded_tasks_counter = Counter('offloaded_tasks', 'Offloaded tasks', ['simulation'])
+processing_pod_time = Gauge('pod_processing_time', 'Task allocation time', ['pod', 'simulation'])
+kube_processing_pod_time = Gauge('kube_pod_processing_time', 'K8S task processing time', ['pod', 'simulation'])
 # priority_histogram = Histogram('priority', 'Priorities', ['pod'])
-priority_counter = Gauge('priority', 'Task priority', ['pod', 'priority'])
+priority_counter = Gauge('priority', 'Task priority', ['pod', 'priority', 'simulation'])
 
 admission_controller = Flask(__name__)
 
@@ -42,6 +42,13 @@ metrics = PrometheusMetrics(admission_controller)
 nodes: list[Node] = init_nodes()
 
 MAX_REALLOC = int(os.environ.get("MAX_REALLOC"))
+SIMULATION_NAME = os.environ.get("SIMULATION_NAME")
+
+SIMULATION_NAME = SIMULATION_NAME + f"-{str(time.time())}"
+
+with open('simulation.id', 'w', newline='') as file:
+    file.write(SIMULATION_NAME)
+    file.close()
 
 
 solver = FRICO(nodes, MAX_REALLOC)
@@ -79,7 +86,7 @@ def process_pod():
                 file.close()
 
             task = Task(pod_id, pod_metadata["name"], parse_cpu_to_millicores(pod_spec["containers"][0]["resources"]["requests"]["cpu"]), parse_memory_to_bytes(pod_spec["containers"][0]["resources"]["requests"]["memory"]), priority, color)
-            total_tasks_counter.inc()
+            total_tasks_counter.labels(simulation=SIMULATION_NAME).inc()
 
             node_name = ''
             shit_to_be_done: list[tuple[Task, Node]] = []
@@ -89,28 +96,27 @@ def process_pod():
             frico_end_time = time.perf_counter()
 
             allowed = node_name != ''
-            processing_pod_time.labels(pod=pod_id).set(frico_end_time - frico_start_time)
-            admission_controller.logger.info(f"Setting results for pod {pod_id}")
+            processing_pod_time.labels(pod=pod_id, simulation=SIMULATION_NAME).set(frico_end_time - frico_start_time)
             if allowed:
-                allocated_tasks_counter.labels(node=node_name).inc()
-                objective_value_gauge.inc(task.objective_value())
-                priority_counter.labels(pod=pod_id, priority=str(task.priority.value)).inc()
+                allocated_tasks_counter.labels(node=node_name, simulation=SIMULATION_NAME).inc()
+                objective_value_gauge.labels(simulation=SIMULATION_NAME).inc(task.objective_value())
+                priority_counter.labels(simulation=SIMULATION_NAME, pod=pod_id, priority=str(task.priority.value)).inc()
 
                 for shit, to_shit in shit_to_be_done:
                     if to_shit is None:
                         delete_pod(shit.name, "tasks")
-                        offloaded_tasks_counter.inc()
-                        priority_counter.labels(pod=pod_id, priority=str(task.priority.value)).dec()
+                        offloaded_tasks_counter.labels(simulation=SIMULATION_NAME).inc()
+                        priority_counter.labels(simulation=SIMULATION_NAME,pod=pod_id, priority=str(task.priority.value)).dec()
                     else:
                         try:
                             reschedule(shit.name, "tasks", to_shit.name)
                         except:
                             logging.info("Removing pod {shit.name} from {to_shit.name}. Finished before reschedeling")
                             solver.release(shit, to_shit)
-                        reallocated_tasks_counter.inc()
+                        reallocated_tasks_counter.labels(simulation=SIMULATION_NAME).inc()
                     
             else:
-                unallocated_tasks_counter.inc()
+                unallocated_tasks_counter.labels(simulation=SIMULATION_NAME).inc()
 
             # if solver.offloaded_tasks > offloaded_tasks:
             #     offloaded_tasks_counter.inc(solver.offloaded_tasks - offloaded_tasks)
@@ -192,7 +198,7 @@ def deployment_webhook_mutate():
     kube_processing_time_start = time.perf_counter()
     request_events[pod_id].wait()
     kube_processing_time_end = time.perf_counter()
-    kube_processing_pod_time.labels(pod=pod_id).set(kube_processing_time_end - kube_processing_time_start)
+    kube_processing_pod_time.labels(pod=pod_id, simulation=SIMULATION_NAME).set(kube_processing_time_end - kube_processing_time_start)
 
     allowed, message, patches = request_results.pop(pod_id)
 

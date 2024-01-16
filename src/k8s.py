@@ -1,5 +1,5 @@
 from kubernetes import client, config, watch
-from frico import Node, FRICO, handle_pod
+from frico import Node, FRICO, handle_pod, Task
 import logging
 from threading import Event
 import time
@@ -32,32 +32,51 @@ def delete_pod(pod_name: str, namespace: str):
         logging.warning(f"Exception when deleting pod: {e}")
         raise e
 
-def reschedule(pod_name: str, namespace: str, new_node_name: str):
+def reschedule(task: Task, namespace: str, new_node_name: str):
     v1 = client.CoreV1Api()
     try:
-        logging.info(f"Rescheduling task {pod_name}")
+        logging.info(f"Rescheduling task {task.name}")
+        pod = None
         try:
-            pod = v1.read_namespaced_pod(name=pod_name, namespace=namespace)
+            pod = v1.read_namespaced_pod(name=task.name, namespace=namespace)
         except Exception as e:
-            logging.warning(f"Got you fucker {pod_name}")
+            logging.warning(f"Got you fucker {task.name}")
         try:
-            thr = v1.delete_namespaced_pod(name=pod_name, namespace=namespace,body=client.V1DeleteOptions(grace_period_seconds=0))
-            logging.info(f"Pod {pod_name} deleted due rescheduling")
+            thr = v1.delete_namespaced_pod(name=task.name, namespace=namespace,body=client.V1DeleteOptions(grace_period_seconds=0))
+            logging.info(f"Pod {task.name} deleted due rescheduling")
         except Exception as e:
             logging.warning(f"Exception when deleting pod during rescheduling: {e}")
         new_pod = client.V1Pod()
-        new_labels = pod.metadata.labels
+
+        new_labels = {}
+        new_annotations = {}
+        new_exec_time = 5
+        new_resources = {}
+        if pod is None:
+            new_annotations["v2x.context/priority"] = str(task.priority.value)
+            new_annotations["v2x.context/color"] = task.color
+            new_annotations["v2x.context/exec_time"] = "5"
+            new_labels["arrival_time"] = str(int(time.time()))
+            new_labels["exec_time"] = "5"
+            new_resources = client.V1ResourceRequirements(requests={"cpu": f"{str(task.cpu_requirement)}m", "memory": f"{str(task.memory_requirement)}"})
+        else:
+            new_labels = pod.metadata.labels
+            new_annotations = pod.metadata.annotations
+            arrival_time = int(pod.metadata.labels["arrival_time"])
+            # 2 is k8s overhead :)
+            exec_time = int(pod.metadata.labels["exec_time"])
+            new_exec_time = exec_time - (int(time.time()) - arrival_time)
+            new_resources = pod.spec.containers[0].resources
+
         new_labels["node_name"] = new_node_name
         new_labels["frico_skip"] = "true"
-        new_pod.metadata = client.V1ObjectMeta(name=pod.metadata.name, labels=new_labels, annotations=pod.metadata.annotations)
-        arrival_time = int(pod.metadata.labels["arrival_time"])
-        # 2 is k8s overhead :)
-        exec_time = int(pod.metadata.labels["exec_time"])
-        new_exec_time = exec_time - (int(time.time()) - arrival_time)
-        new_pod.spec = client.V1PodSpec(node_selector={"name": new_node_name}, restart_policy="Never", containers=[client.V1Container(name=pod.spec.containers[0].name, image=pod.spec.containers[0].image, command=pod.spec.containers[0].command, args=["-c", f"sleep {new_exec_time if new_exec_time > 0 else 5} && exit 0"], resources=pod.spec.containers[0].resources)])
+        
+        new_pod.metadata = client.V1ObjectMeta(name=task.name, labels=new_labels, annotations=new_annotations)
+        
+        new_pod.spec = client.V1PodSpec(node_selector={"name": new_node_name}, restart_policy="Never", containers=[client.V1Container(name="task", image="alpine@sha256:6ce9a9a256a3495ae60ab0059ed1c7aee5ee89450477f2223f6ea7f6296df555", command=["/bin/sh"], args=["-c", f"sleep {new_exec_time if new_exec_time > 0 else 5} && exit 0"], resources=new_resources)])
         try:
             response = v1.create_namespaced_pod(namespace=namespace, body=new_pod)
-            logging.info(f"Pod {pod_name} createt, rescheduled")
+            logging.info(f"Pod {task.name} createt, rescheduled")
         except Exception as e:
             logging.warning(f"Exception when creating pod during rescheduling: {e}")
     except Exception as e:

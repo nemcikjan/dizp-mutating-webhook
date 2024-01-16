@@ -45,7 +45,7 @@ nodes: list[Node] = init_nodes()
 MAX_REALLOC = int(os.environ.get("MAX_REALLOC"))
 SIMULATION_NAME = os.environ.get("SIMULATION_NAME")
 
-SIMULATION_NAME = SIMULATION_NAME + f"-{str(time.time())}"
+SIMULATION_NAME = SIMULATION_NAME + f"-{str(int(time.time()))}"
 
 with open('simulation.id', 'w', newline='') as file:
     file.write(SIMULATION_NAME)
@@ -113,7 +113,7 @@ def process_pod():
                         priority_counter.labels(simulation=SIMULATION_NAME,pod=pod_id, priority=str(task.priority.value)).dec()
                     else:
                         try:
-                            reschedule(shit.name, "tasks", to_shit.name)
+                            reschedule(shit, "tasks", to_shit.name)
                         except:
                             logging.info("Removing pod {shit.name} from {to_shit.name}. Finished before reschedeling")
                             solver.release(shit, to_shit)

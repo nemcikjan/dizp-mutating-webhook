@@ -3,6 +3,14 @@ from typing import Optional
 from sortedcontainers import SortedList
 import heapq
 import logging
+import time
+import string
+import random
+
+def generate_random_string(length):
+    letters = string.ascii_lowercase
+    return ''.join(random.choice(letters) for _ in range(length))
+
 
 class Priority(Enum):
     NONE = 1
@@ -85,11 +93,12 @@ class Node(object):
         self.current_value -= task.priority.value
         self.current_objective -= task.objective_value()
 
-    def get_task_by_id(self, id: int) -> Task:
+    def get_task_by_id(self, id: str) -> Task:
         task = next((t for t in self.allocated_tasks if t.id == id), None)
         if task is None:
             raise Exception(f"Task with id {id} not found")
         return task
+        
 
 
 class FRICO:
@@ -293,6 +302,10 @@ class FRICO:
 
         return best_knapsack
     
+def remove_expired(solver: FRICO):
+    tasks = sorted([(t, k[1]) for k in solver.knapsacks for t in k[1].allocated_tasks], key=lambda x: x.arrival_time + x.exec_time < int(time.time()))
+    
+
 def handle_pod(solver: FRICO, task_id: str, node_name: str):
     try:
         node = solver.get_node_by_name(node_name)

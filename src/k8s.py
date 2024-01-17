@@ -4,6 +4,8 @@ import logging
 from threading import Event
 import time
 from sortedcontainers import SortedList
+import string
+import random
 
 config.load_incluster_config()
 # config.load_config()
@@ -41,13 +43,14 @@ def reschedule(task: Task, namespace: str, new_node_name: str):
             pod = v1.read_namespaced_pod(name=task.name, namespace=namespace)
         except Exception as e:
             logging.warning(f"Got you fucker {task.name}")
-        try:
-            thr = v1.delete_namespaced_pod(name=task.name, namespace=namespace,body=client.V1DeleteOptions(grace_period_seconds=0))
-            logging.info(f"Pod {task.name} deleted due rescheduling")
-        except Exception as e:
-            logging.warning(f"Exception when deleting pod during rescheduling: {e}")
+        if pod is not None:
+            try:
+                thr = v1.delete_namespaced_pod(name=task.name, namespace=namespace,body=client.V1DeleteOptions(grace_period_seconds=0))
+                logging.info(f"Pod {task.name} deleted due rescheduling")
+            except Exception as e:
+                logging.warning(f"Exception when deleting pod during rescheduling: {e}")
         new_pod = client.V1Pod()
-
+ 
         new_labels = {}
         new_annotations = {}
         new_exec_time = 5
@@ -58,6 +61,8 @@ def reschedule(task: Task, namespace: str, new_node_name: str):
             new_annotations["v2x.context/exec_time"] = "5"
             new_labels["arrival_time"] = str(int(time.time()))
             new_labels["exec_time"] = "5"
+            new_labels["frico"] = "true"
+            new_labels["task_id"] = task.name
             new_resources = client.V1ResourceRequirements(requests={"cpu": f"{str(task.cpu_requirement)}m", "memory": f"{str(task.memory_requirement)}"})
         else:
             new_labels = pod.metadata.labels
@@ -94,8 +99,10 @@ def watch_pods(solver: FRICO, stop_signal: Event):
         logging.info("Starting watching for pods")
         # Watch for events related to Pods
 
-        for event in w.stream(corev1.list_namespaced_pod, "tasks"):
+        for event in w.stream(corev1.list_namespaced_pod, "tasks", field_selector="status.phase=Succeeded", label_selector="frico=true"):
             pod = event['object']
+            event_type = event['type']
+            logging.info(f"Pod event type {event_type}")
             # job_status = job.status.succeeded
             pod_status = pod.status.phase
             # logging.info(f"Pod {pod_name} labels {pod.metadata.labels}")
@@ -104,9 +111,10 @@ def watch_pods(solver: FRICO, stop_signal: Event):
                 break
 
             try:
-                if "frico" in pod.metadata.labels and pod_status == "Succeeded":
+                # if "frico" in pod.metadata.labels and pod_status == "Succeeded":
+                if event_type == "ADDED":
                     logging.info(f"Pod {pod.metadata.name} succeeded")
-                    handle_pod(solver, pod.metadata.labels["task_id"], pod.metadata.labels["node_name"])
+                    handle_pod(solver, pod.metadata.name, pod.metadata.labels["node_name"])
                     # deleted_pods.add(pod.metadata.name)
                     # cleanup
                     delete_pod(pod.metadata.name, pod.metadata.namespace)

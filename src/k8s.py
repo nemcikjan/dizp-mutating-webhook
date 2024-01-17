@@ -102,10 +102,6 @@ def watch_pods(solver: FRICO, stop_signal: Event):
         for event in w.stream(corev1.list_namespaced_pod, "tasks", field_selector="status.phase=Succeeded", label_selector="frico=true"):
             pod = event['object']
             event_type = event['type']
-            logging.info(f"Pod event type {event_type}")
-            # job_status = job.status.succeeded
-            pod_status = pod.status.phase
-            # logging.info(f"Pod {pod_name} labels {pod.metadata.labels}")
 
             if stop_signal.is_set():
                 break

@@ -75,7 +75,7 @@ def process_pod():
             
             pod_spec = pod["spec"]
             admission_controller.logger.info(f"Name: {pod_metadata["name"]} Priority: {priority} Color: {color} Exec time: {exec_time}")
-            row_to_append = [pod_metadata["name"],priority.value, color, exec_time, parse_cpu_to_millicores(pod_spec["containers"][0]["resources"]["requests"]["cpu"]), parse_memory_to_bytes(pod_spec["containers"][0]["resources"]["requests"]["memory"])]
+            row_to_append = [pod_metadata["name"],priority.value, color, exec_time,str(int(time.time())), parse_cpu_to_millicores(pod_spec["containers"][0]["resources"]["requests"]["cpu"]), parse_memory_to_bytes(pod_spec["containers"][0]["resources"]["requests"]["memory"])]
 
             # The path to your CSV file
             file_path = 'test_bed.csv'

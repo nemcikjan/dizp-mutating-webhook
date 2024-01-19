@@ -78,7 +78,7 @@ def reschedule(task: Task, namespace: str, new_node_name: str):
         
         new_pod.metadata = client.V1ObjectMeta(name=task.name, labels=new_labels, annotations=new_annotations)
         
-        new_pod.spec = client.V1PodSpec(node_selector={"name": new_node_name}, restart_policy="Never", containers=[client.V1Container(name="task", image="alpine@sha256:6ce9a9a256a3495ae60ab0059ed1c7aee5ee89450477f2223f6ea7f6296df555", command=["/bin/sh"], args=["-c", f"sleep {new_exec_time if new_exec_time > 0 else 5} && exit 0"], resources=new_resources)])
+        new_pod.spec = client.V1PodSpec(node_selector={"name": new_node_name}, restart_policy="Never", containers=[client.V1Container(name="task", image="alpine:3.19", command=["/bin/sh"], args=["-c", f"sleep {new_exec_time if new_exec_time > 0 else 5} && exit 0"], resources=new_resources)])
         try:
             response = v1.create_namespaced_pod(namespace=namespace, body=new_pod)
             logging.info(f"Pod {task.name} createt, rescheduled")

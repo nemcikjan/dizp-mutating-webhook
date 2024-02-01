@@ -192,13 +192,17 @@ class FRICO:
 
             while self.knapsacks and not choosen_node:
                 capacity, knapsack = heapq.heappop(self.knapsacks)
+                # check if color constraint is fulfilled
                 if task.color in knapsack.colors:
+                    # iterate over allocated tasks in the knapsack
                     for t in iter(knapsack.allocated_tasks):
                         visited_knapsacks: list[tuple[float, Node]] = []
                         found = False
                         while temp_knapsacks and not found:
                             c, k = heapq.heappop(temp_knapsacks)
+                            # iterate over other knapsacks than self that match the task color
                             if k != knapsack and t.color in k.colors:
+                                
                                 if k.can_allocate(t):
                                     knapsack.release_task(t)
                                     k.allocate_task(t)
@@ -209,7 +213,7 @@ class FRICO:
                         for item in visited_knapsacks:
                             heapq.heappush(temp_knapsacks, item)
                         self.update_heap()
-
+                        # after each reallocated task check if the incoming can be allocated
                         applicable = self.find_applicable(task)
                         if (applicable is not None):
                             allocated = True

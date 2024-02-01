@@ -2,11 +2,27 @@
 # kind: Namespace
 # metadata:
 #   name: frico
+# ---
+# kind: Service
+# apiVersion: v1
+# metadata:
+#   name: frico-webhook
+#   namespace: frico
+#   labels:
+#     app: frico
+# spec:
+#   selector:
+#     app: frico
+#   ports:
+#     - name: https
+#       protocol: TCP
+#       port: 443
+#       targetPort: 443
 ---
 kind: Service
 apiVersion: v1
 metadata:
-  name: frico-webhook
+  name: eaoda-controller
   namespace: frico
   labels:
     app: frico
@@ -14,10 +30,10 @@ spec:
   selector:
     app: frico
   ports:
-    - name: https
+    - name: http
       protocol: TCP
-      port: 443
-      targetPort: 443
+      port: 8080
+      targetPort: 8080
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -48,14 +64,14 @@ spec:
           image: ghcr.io/nemcikjan/dizp-mutating-webhook:v20240119-95741a5
           imagePullPolicy: IfNotPresent
           args:
-            - "--bind=0.0.0.0:443"
-            - "--certfile=/certs/tls.crt"
-            - "--keyfile=/certs/tls.key"
-            - "mutating_admission_controller:admission_controller"
-          volumeMounts:
-            - readOnly: true
-              mountPath: /certs
-              name: webhook-certs
+            - "--bind=0.0.0.0:8080"
+            # - "--certfile=/certs/tls.crt"
+            # - "--keyfile=/certs/tls.key"
+            - "eaoda_controller:eaoda"
+          # volumeMounts:
+          #   - readOnly: true
+          #     mountPath: /certs
+          #     name: webhook-certs
           # readinessProbe:
           #   httpGet:
           #     path: /health
@@ -71,10 +87,10 @@ spec:
           #   initialDelaySeconds: 3
           #   periodSeconds: 5
       terminationGracePeriodSeconds: 20
-      volumes:
-        - name: webhook-certs
-          secret:
-            secretName: frico-webhook-certs
+      # volumes:
+      #   - name: webhook-certs
+      #     secret:
+      #       secretName: frico-webhook-certs
 ---
 kind: ServiceAccount
 apiVersion: v1

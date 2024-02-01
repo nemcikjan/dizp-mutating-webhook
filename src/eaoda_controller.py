@@ -1,10 +1,8 @@
 from flask import Flask, request, jsonify
-import base64
-import jsonpatch
-from frico import FRICO, Task, Node, Priority, handle_pod
+from frico import FRICO, Task, Node, Priority
 from prometheus_flask_exporter import PrometheusMetrics
-from prometheus_client import Counter, Gauge, Histogram
-from k8s import init_nodes, watch_pods, parse_cpu_to_millicores, parse_memory_to_bytes, reschedule, delete_pod
+from prometheus_client import Counter, Gauge
+from k8s import init_nodes, watch_pods, reschedule, delete_pod, create_pod, PodData
 import os
 import threading
 import http
@@ -12,11 +10,10 @@ import logging
 import signal
 import time
 import queue
-import uuid
 import csv
 
 request_events: dict[str, threading.Event] = {}
-request_results: dict[str, tuple[bool, str, jsonpatch.JsonPatch]] = {}
+request_results: dict[str, tuple[bool, str, dict[str]]] = {}
 
 pod_queue = queue.Queue()
 
@@ -28,16 +25,15 @@ objective_value_gauge = Gauge('objective_value', 'Current objective value', ['si
 offloaded_tasks_counter = Counter('offloaded_tasks', 'Offloaded tasks', ['simulation'])
 processing_pod_time = Gauge('pod_processing_time', 'Task allocation time', ['pod', 'simulation'])
 kube_processing_pod_time = Gauge('kube_pod_processing_time', 'K8S task processing time', ['pod', 'simulation'])
-# priority_histogram = Histogram('priority', 'Priorities', ['pod'])
 priority_counter = Gauge('priority', 'Task priority', ['pod', 'priority', 'simulation'])
 unallocated_priority_counter = Gauge('unallocated_priorities', 'Unallocated task priority', ['priority', 'simulation'])
 
-admission_controller = Flask(__name__)
+eaoda = Flask(__name__)
 
 logging.basicConfig(filename='app.log', level=logging.INFO, 
                     format='%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]')
 
-metrics = PrometheusMetrics(admission_controller)
+metrics = PrometheusMetrics(eaoda)
 
 
 nodes: list[Node] = init_nodes()
@@ -68,25 +64,22 @@ def process_pod():
         try:
         # Process the pod here (mutate, etc.)
         # Replace the following line with your actual mutation logic
-            pod_metadata = pod["metadata"]
-            priority = Priority(int(pod_metadata["annotations"]["v2x.context/priority"]))
-            color = pod_metadata["annotations"]["v2x.context/color"]
-            exec_time = pod_metadata["annotations"]["v2x.context/exec_time"]
+            pod_name = pod["name"]
+            priority = Priority(int(pod["priority"]))
+            color = pod["color"]
+            exec_time = pod["exec_time"]
+            cpu = int(pod["cpu"]) * 1000
+            memory = int(pod["memory"]) * 1024**2
             
-            pod_spec = pod["spec"]
-            admission_controller.logger.info(f"Name: {pod_metadata["name"]} Priority: {priority} Color: {color} Exec time: {exec_time}")
-            row_to_append = [pod_metadata["name"],priority.value, color, exec_time,str(int(time.time())), parse_cpu_to_millicores(pod_spec["containers"][0]["resources"]["requests"]["cpu"]), parse_memory_to_bytes(pod_spec["containers"][0]["resources"]["requests"]["memory"])]
+            eaoda.logger.info(f"Name: {pod_name} Priority: {priority} Color: {color} Exec time: {exec_time}")
+            row_to_append = [pod_id, priority.value, color, exec_time, str(int(time.time())), cpu, memory]
 
-            # The path to your CSV file
-            file_path = 'test_bed.csv'
-
-            # Open the file in append mode ('a') and write the data
-            with open(file_path, 'a', newline='') as file:
+            with open('test_bed.csv', 'a', newline='') as file:
                 writer = csv.writer(file)
                 writer.writerow(row_to_append)
                 file.close()
 
-            task = Task(pod_id, pod_metadata["name"], parse_cpu_to_millicores(pod_spec["containers"][0]["resources"]["requests"]["cpu"]), parse_memory_to_bytes(pod_spec["containers"][0]["resources"]["requests"]["memory"]), priority, color)
+            task = Task(pod_id, pod_name, cpu, memory, priority, color)
             total_tasks_counter.labels(simulation=SIMULATION_NAME).inc()
 
             node_name = ''
@@ -123,51 +116,25 @@ def process_pod():
                 unallocated_tasks_counter.labels(simulation=SIMULATION_NAME).inc()
                 unallocated_priority_counter.labels(simulation=SIMULATION_NAME, priority=str(task.priority.value)).inc()
 
-            # if solver.offloaded_tasks > offloaded_tasks:
-            #     offloaded_tasks_counter.inc(solver.offloaded_tasks - offloaded_tasks)
-            #     offloaded_tasks = solver.offloaded_tasks
+            pod_data = {
+                "node_name": node_name,
+                "task_id": pod_id,
+                "arrival_time": str(int(time.time())),
+                "exec_time": str(exec_time),
+                "priority": priority,
+                "color": color,
+                "cpu": cpu,
+                "memory": memory
+            }
 
-            patches = [
-                {
-                    "op": "add", 
-                    "path": "/spec/nodeSelector", 
-                    "value": {"name": node_name}
-                },
-                {
-                    "op": "add",
-                    "path": "/metadata/labels/task_id",
-                    "value": pod_id
-                }, 
-                {
-                    "op": "add",
-                    "path": "/metadata/labels/frico",
-                    "value": "true"
-                },
-                {
-                    "op": "add",
-                    "path": "/metadata/labels/node_name",
-                    "value": node_name
-                },
-                {
-                    "op": "add",
-                    "path": "/metadata/labels/arrival_time",
-                    "value": str(int(time.time()))
-                },
-                {
-                    "op": "add",
-                    "path": "/metadata/labels/exec_time",
-                    "value": str(exec_time)
-                }
-            ]
-
-            admission_controller.logger.info(f"Task {pod_metadata["name"]} -> node {node_name}")
+            eaoda.logger.info(f"Task {pod_name} -> node {node_name}")
 
         # Store the processed result for this pod_id
-            admission_controller.logger.info(f"Setting results for pod {pod_metadata["name"]}: {(allowed, f"Task {pod_metadata["name"]} assigned to {node_name}" if allowed else f"No capacity for task {pod_metadata["name"]}")}")
-            request_results[pod_id] = (allowed, f"Task {pod_metadata["name"]} assigned to {node_name}" if allowed else f"No capacity for task {pod_metadata["name"]}", jsonpatch.JsonPatch(patches) if allowed else jsonpatch.JsonPatch([]))
+            eaoda.logger.info(f"Setting results for pod {pod_name}: {(allowed, f"Task {pod_name} assigned to {node_name}" if allowed else f"No capacity for task {pod_name}")}")
+            request_results[pod_id] = (allowed, f"Task {pod_name} assigned to {node_name}" if allowed else f"No capacity for task {pod_name}", pod_data if allowed else {})
         except Exception as e:
             logging.warning(f"Exception occured: {e}")
-            request_results[pod_id] = (False, f"Exception occured: {e}", jsonpatch.JsonPatch([]))
+            request_results[pod_id] = (False, f"Exception occured: {e}", {})
         finally:
             pod_queue.task_done()
             # Signal that processing is complete
@@ -179,7 +146,7 @@ pod_process_thread = threading.Thread(target=process_pod, daemon=True)
 pod_process_thread.start()
 
 def handle_sigterm(*args):
-    admission_controller.logger.info("SIGTERM received, shutting down")
+    eaoda.logger.info("SIGTERM received, shutting down")
     stop_event.set()
     thread.join(timeout=5)
     pod_process_thread.join(timeout=5)
@@ -187,57 +154,49 @@ def handle_sigterm(*args):
 
 signal.signal(signal.SIGTERM, handle_sigterm)
 
-@admission_controller.route("/health", methods=["GET"])
+@eaoda.route("/health", methods=["GET"])
 def health():
     return ("", http.HTTPStatus.NO_CONTENT)
 
-@admission_controller.route('/mutate', methods=['POST'])
-def deployment_webhook_mutate():
-    request_info = request.get_json()
-    pod = request_info["request"]["object"]
-    uid = request_info["request"]["uid"]
-    pod_metadata = pod["metadata"]
-    pod_id = pod_metadata["name"]
+@eaoda.route('/create', methods=['POST'])
+def create():
+    req = request.get_json()
+    pod_id = req["name"]
+
     request_events[pod_id] = threading.Event()
-    pod_queue.put((pod_id, pod))
+    pod_queue.put((pod_id, req))
     kube_processing_time_start = time.perf_counter()
     request_events[pod_id].wait()
     kube_processing_time_end = time.perf_counter()
     kube_processing_pod_time.labels(pod=pod_id, simulation=SIMULATION_NAME).set(kube_processing_time_end - kube_processing_time_start)
 
-    allowed, message, patches = request_results.pop(pod_id)
+    allowed, message, pod_data = request_results.pop(pod_id)
 
-# Clean up: remove the event for this request
+    # Clean up: remove the event for this request
     del request_events[pod_id]
 
-    return admission_response_patch(allowed, uid, message, json_patch=patches)
+    if allowed:
+        annotations = {
+            "v2x.context/priority": str(pod_data["priority"]),
+            "v2x.context/color": pod_data["color"],
+            "v2x.context/exec_time": str(pod_data["exec_time"])
+        }
+        labels = {
+            "arrival_time": pod_data["arrival_time"],
+            "exec_time": str(pod_data["exec_time"]),
+            "task_id": pod_data["task_id"]
+        }
+        p = PodData(name=pod_data['task_id'], annotations=annotations, labels=labels, cpu_requirement=pod_data["cpu"], memory_requirement=pod_data["memory"], exec_time=pod_data["exec_time"], node_name=pod_data["node_name"])
+        try:
+            create_pod(p, "tasks")
+        except Exception as e:
+            logging.error(f"Error while creating pod: {e}")
+            return {"message": f"Error while creating pod: {e}"}
 
 
-def admission_response_patch(allowed: bool, uid: str, message: str, json_patch: jsonpatch.JsonPatch):
-    base64_patch = base64.b64encode(json_patch.to_string().encode("utf-8")).decode("utf-8")
-    return jsonify({
-        "apiVersion": "admission.k8s.io/v1",
-        "kind": "AdmissionReview",
-        "response": {
-            "allowed": allowed,
-            "uid": uid,
-            "status": {"message": message},
-            "patchType": "JSONPatch",
-            "patch": base64_patch
-            }
-        })
 
-def default_response(uid: str):
-    return jsonify({
-        "apiVersion": "admission.k8s.io/v1",
-        "kind": "AdmissionReview",
-        "response": {
-            "allowed": False, 
-            "uid": uid,
-            "status": {"message": "Not in V2X context"},
-            }
-        })
+    return {"message": message}
 
 
 if __name__ == '__main__':
-    admission_controller.run(host='0.0.0.0', port=443, ssl_context=("/server.crt", "/server.key"))
+    eaoda.run(host='0.0.0.0', port=8080)

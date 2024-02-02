@@ -25,8 +25,9 @@ def init_nodes() -> list[Node]:
     ret = v1.list_node()
     nodes: list[Node] = []
     for i, n in enumerate(ret.items):
-        logging.info(f"Adding node {n.metadata.name} CPU capacity: {int(.95 * parse_cpu_to_millicores(n.status.capacity["cpu"]))} Memory capacity {int(.95 * parse_memory_to_bytes(n.status.capacity["memory"]))} Colors: {str.split(n.metadata.annotations["colors"], sep=",")}")
-        nodes.append(Node(i, n.metadata.name, .95 * parse_cpu_to_millicores(n.status.capacity["cpu"]), .95 * parse_memory_to_bytes(n.status.capacity["memory"]), str.split(n.metadata.annotations["colors"], sep=",")))
+        if not ("type" in n.metadata.labels and n.metadata.labels["type"] == "management"):
+            logging.info(f"Adding node {n.metadata.name} CPU capacity: {int(.95 * parse_cpu_to_millicores(n.status.capacity["cpu"]))} Memory capacity {int(.95 * parse_memory_to_bytes(n.status.capacity["memory"]))} Colors: {str.split(n.metadata.annotations["colors"], sep=",")}")
+            nodes.append(Node(i, n.metadata.name, .95 * parse_cpu_to_millicores(n.status.capacity["cpu"]), .95 * parse_memory_to_bytes(n.status.capacity["memory"]), str.split(n.metadata.annotations["colors"], sep=",")))
     
     return nodes
 
@@ -51,7 +52,7 @@ def create_pod(pod_data: PodData, namespace: str):
         logging.info(f"Pod {pod_data.name} created")
         return response
     except Exception as e:
-        logging.warning(f"Exception when creating pod during: {e}")
+        logging.warning(f"Exception while creating pod: {e}")
         raise e
 
 def reschedule(task: Task, namespace: str, new_node_name: str):
@@ -95,6 +96,7 @@ def reschedule(task: Task, namespace: str, new_node_name: str):
         try:
             response = create_pod(ppod, namespace)
             logging.info(f"Pod {task.name} created, rescheduled")
+            return response
         except Exception as e:
             logging.warning(f"Exception when creating pod during rescheduling: {e}")
     except Exception as e:

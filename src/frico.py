@@ -173,8 +173,10 @@ class FRICO:
         for item in nodes:
             heapq.heappush(self.knapsacks, item)
 
-    def solve(self, task: Task) -> (str, list[tuple[Task, Node]]):
-        tasks_to_reschedule: list[tuple[Task, Node]] = []
+    # def solve(self, task: Task) -> (str, list[tuple[Task, Node]]):
+    def solve(self, task: Task) -> (str, dict[str, tuple[Task, Node]]):
+        # tasks_to_reschedule: list[tuple[Task, Node]] = []
+        tasks_to_reschedule: dict[str, tuple[Task, Node]] = {}
         suitable_node = self.find_applicable(task)
 
         if suitable_node is not None:
@@ -206,12 +208,17 @@ class FRICO:
                                 if k.can_allocate(t):
                                     knapsack.release_task(t)
                                     k.allocate_task(t)
-                                    tasks_to_reschedule.append((t, k))
+                                    tasks_to_reschedule[t.id] = (t, k)
                                     found = True
                             visited_knapsacks.append((c,k))
                         
                         for item in visited_knapsacks:
                             heapq.heappush(temp_knapsacks, item)
+
+                        # update heap for temp knapsacks
+                        temp_knapsacks = [(self.calculate_capacity(n), n) for _, n in temp_knapsacks]
+                        heapq.heapify(temp_knapsacks)
+
                         self.update_heap()
                         # after each reallocated task check if the incoming can be allocated
                         applicable = self.find_applicable(task)
@@ -274,11 +281,11 @@ class FRICO:
                                 knapsack.allocate_task(t)
                                 task_allocated = True
                                 self.update_heap()
-                                tasks_to_reschedule.append((t, knapsack))
+                                tasks_to_reschedule[t.id] = (t, knapsack)
                             l_searched_knapsacks.append((capacity, knapsack))
                         
                         if not task_allocated:
-                            tasks_to_reschedule.append((t, None))
+                            tasks_to_reschedule[t.id] = (t, None)
                             self.offloaded_tasks += 1
                         
                         self.return_to_heap(l_searched_knapsacks)

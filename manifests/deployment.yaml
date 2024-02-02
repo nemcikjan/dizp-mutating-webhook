@@ -33,7 +33,6 @@ spec:
     - name: http
       protocol: TCP
       port: 8080
-      targetPort: 8080
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -54,9 +53,12 @@ spec:
       name: webhook
     spec:
       serviceAccountName: frico
+      nodeSelector:
+        type: management
       containers:
         - name: logs
           image: cr.fluentbit.io/fluent/fluent-bit:2.1.10
+          imagePullPolicy: IfNotPresent
           env:
             - name: PATH_TO_TAIL
               value: /logs/app.log
@@ -69,8 +71,7 @@ spec:
               name: fluentbit-config
               subPath: fluent-bit.conf
               readOnly: true
-
-        - name: webhook
+        - name: eaoda
           env:
             - name: MAX_REALLOC
               value: "4"
@@ -78,7 +79,7 @@ spec:
               value: Barnim
             - name: LOG_PATH
               value: /logs/app.log
-          image: ghcr.io/nemcikjan/dizp-mutating-webhook:v20240201-2115f5d
+          image: ghcr.io/nemcikjan/dizp-mutating-webhook:v20240202-d18b76d
           imagePullPolicy: IfNotPresent
           args:
             - "--bind=0.0.0.0:8080"
@@ -88,6 +89,8 @@ spec:
           volumeMounts:
             - name: logs
               mountPath: /logs
+          ports:
+            - containerPort: 8080
           #   - readOnly: true
           #     mountPath: /certs
           #     name: webhook-certs
@@ -224,7 +227,7 @@ data:
       Buffer_Max_Size     1MB
       DB                  /tmp/fluent-bit-state.db
       DB.Sync             Normal
-      Parser              docker
+      # Parser              docker
 
     [OUTPUT]
       Name  stdout

@@ -57,6 +57,30 @@ stop_event = threading.Event()
 thread = threading.Thread(target=watch_pods, args=(solver, stop_event), daemon=True)
 thread.start()
 
+def rescheduling(shit: Task, to_shit: Node, pod_id: str, priority: str) -> None:
+    if to_shit is None:
+        try:
+            res = delete_pod(shit.name, "tasks")
+        except Exception as e:
+            logging.warning(f"There was an issue deleting pod during offloading. Probably finished first")
+        offloaded_tasks_counter.labels(simulation=SIMULATION_NAME).inc()
+        priority_counter.labels(simulation=SIMULATION_NAME,pod=pod_id, priority=priority).dec()
+    else:
+        try:
+            res = reschedule(shit, "tasks", to_shit.name)
+        except:
+            logging.warning(f"Removing pod {shit.name} from {to_shit.name} failed. Finished before reschedeling")
+            solver.release(shit, to_shit)
+        reallocated_tasks_counter.labels(simulation=SIMULATION_NAME).inc()
+
+def offloading(shit: Task, pod_id: str, priority: str):
+    try:
+        res = delete_pod(shit.name, "tasks")
+    except Exception as e:
+        logging.warning(f"There was an issue deleting pod during offloading. Probably finished first")
+    offloaded_tasks_counter.labels(simulation=SIMULATION_NAME).inc()
+    priority_counter.labels(simulation=SIMULATION_NAME,pod=pod_id, priority=priority).dec()
+
 def process_pod():
     while not stop_event.is_set():
         if stop_event.is_set():
@@ -69,8 +93,8 @@ def process_pod():
             pod_name = pod["name"]
             priority = Priority(int(pod["priority"]))
             color = pod["color"]
-            exec_time = pod["exec_time"]
-            cpu = int(pod["cpu"]) * 1000
+            exec_time = pod["execTime"]
+            cpu = int(pod["cpu"])
             memory = int(pod["memory"]) * 1024**2
             
             eaoda.logger.info(f"Name: {pod_name} Priority: {priority} Color: {color} Exec time: {exec_time}")
@@ -85,7 +109,7 @@ def process_pod():
             total_tasks_counter.labels(simulation=SIMULATION_NAME).inc()
 
             node_name = ''
-            shit_to_be_done: list[tuple[Task, Node]] = []
+            shit_to_be_done: dict[str, tuple[Task, Node]] = {}
             frico_start_time = time.perf_counter()
             if solver.is_admissable(task):
                 node_name, shit_to_be_done = solver.solve(task)
@@ -98,19 +122,30 @@ def process_pod():
                 objective_value_gauge.labels(simulation=SIMULATION_NAME).inc(task.objective_value())
                 priority_counter.labels(simulation=SIMULATION_NAME, pod=pod_id, priority=str(task.priority.value)).inc()
 
-                for shit, to_shit in shit_to_be_done:
+                # task_to_last_node: dict[str, tuple[Task, Node]] = {}
+
+                # # Iterate through the array and filter it
+                # filtered_array: list[tuple[Task, Node]] = []
+
+                # for task, node in shit_to_be_done:
+                #     task_to_last_node[task.id] = (task, node)
+
+                # filtered_array = [task_node_tuple for _, task_node_tuple in task_to_last_node.items()]
+
+                # for shit, to_shit in shit_to_be_done:
+                for _, (shit, to_shit) in shit_to_be_done.items():
                     if to_shit is None:
                         try:
-                            delete_pod(shit.name, "tasks")
+                            res = delete_pod(shit.name, "tasks")
                         except Exception as e:
                             logging.warning(f"There was an issue deleting pod during offloading. Probably finished first")
                         offloaded_tasks_counter.labels(simulation=SIMULATION_NAME).inc()
-                        priority_counter.labels(simulation=SIMULATION_NAME,pod=pod_id, priority=str(task.priority.value)).dec()
+                        priority_counter.labels(simulation=SIMULATION_NAME,pod=pod_id, priority=priority).dec()
                     else:
                         try:
-                            reschedule(shit, "tasks", to_shit.name)
+                            res = reschedule(shit, "tasks", to_shit.name)
                         except:
-                            logging.info("Removing pod {shit.name} from {to_shit.name}. Finished before reschedeling")
+                            logging.warning(f"Removing pod {shit.name} from {to_shit.name} failed. Finished before reschedeling")
                             solver.release(shit, to_shit)
                         reallocated_tasks_counter.labels(simulation=SIMULATION_NAME).inc()
                     
@@ -186,9 +221,11 @@ def create():
         labels = {
             "arrival_time": pod_data["arrival_time"],
             "exec_time": str(pod_data["exec_time"]),
-            "task_id": pod_data["task_id"]
+            "task_id": pod_data["task_id"],
+            "frico": "true",
+            "node_name": pod_data["node_name"]
         }
-        p = PodData(name=pod_data['task_id'], annotations=annotations, labels=labels, cpu_requirement=pod_data["cpu"], memory_requirement=pod_data["memory"], exec_time=pod_data["exec_time"], node_name=pod_data["node_name"])
+        p = PodData(name=pod_data['task_id'], annotations=annotations, labels=labels, cpu_requirement=pod_data["cpu"], memory_requirement=pod_data["memory"], exec_time=int(pod_data["exec_time"]), node_name=pod_data["node_name"])
         try:
             create_pod(p, "tasks")
         except Exception as e:

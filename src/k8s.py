@@ -46,7 +46,7 @@ def create_pod(pod_data: PodData, namespace: str):
     pod = client.V1Pod()
     pod.metadata = client.V1ObjectMeta(name=pod_data.name, labels=pod_data.labels, annotations=pod_data.annotations)
     new_resources = client.V1ResourceRequirements(requests={"cpu": f"{str(pod_data.cpu_requirement)}m", "memory": f"{str(pod_data.memory_requirement)}"})
-    pod.spec = client.V1PodSpec(node_selector={"name": pod_data.node_name}, restart_policy="Never", containers=[client.V1Container(name="task", image="alpine:3.19", command=["/bin/sh"], args=["-c", f"sleep {pod_data.exec_time if pod_data.exec_time > 0 else 5} && exit 0"], resources=new_resources)])
+    pod.spec = client.V1PodSpec(node_selector={"name": pod_data.node_name}, restart_policy="Never", containers=[client.V1Container(name="task", image="alpine:3.19", command=["/bin/sh"], args=["-c", f"sleep {pod_data.exec_time if pod_data.exec_time > 0 else 0} && exit 0"], resources=new_resources)])
     try:
         response = v1.create_namespaced_pod(namespace=namespace, body=pod)
         logging.info(f"Pod {pod_data.name} created")
@@ -73,13 +73,13 @@ def reschedule(task: Task, namespace: str, new_node_name: str):
  
         new_labels = {}
         new_annotations = {}
-        new_exec_time = 5
+        new_exec_time = 0
         if pod is None:
             new_annotations["v2x.context/priority"] = str(task.priority.value)
             new_annotations["v2x.context/color"] = task.color
             new_annotations["v2x.context/exec_time"] = str(new_exec_time)
             new_labels["arrival_time"] = str(int(time.time()))
-            new_labels["exec_time"] = "5"
+            new_labels["exec_time"] = "0"
             new_labels["frico"] = "true"
             new_labels["task_id"] = task.name
         else:

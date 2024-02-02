@@ -50,11 +50,14 @@ spec:
     metadata:
       labels:
         app: frico
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
       name: webhook
     spec:
       serviceAccountName: frico
       nodeSelector:
-        type: management
+        kubernetes.io/hostname: odin
       containers:
         - name: logs
           image: cr.fluentbit.io/fluent/fluent-bit:2.1.10
@@ -79,7 +82,9 @@ spec:
               value: Barnim
             - name: LOG_PATH
               value: /logs/app.log
-          image: ghcr.io/nemcikjan/dizp-mutating-webhook:v20240202-6f0ce57
+            - name: TEST_BED_PATH
+              value: /test-bed/data.csv
+          image: ghcr.io/nemcikjan/dizp-mutating-webhook:v20240203-dd34e2b
           imagePullPolicy: IfNotPresent
           args:
             - "--bind=0.0.0.0:8080"
@@ -89,6 +94,8 @@ spec:
           volumeMounts:
             - name: logs
               mountPath: /logs
+            - name: test-bed
+              mountPath: /test-bed
           ports:
             - containerPort: 8080
           #   - readOnly: true
@@ -115,6 +122,11 @@ spec:
             name: fluentbit-config
         - name: logs
           emptyDir: {}
+        - name: test-bed
+          # mount /data/foo, but only if that directory already exists
+          hostPath:
+            path: /mnt1/eaoda # directory location on host
+            type: DirectoryOrCreate # this field is optional
 
       # volumes:
       #   - name: webhook-certs

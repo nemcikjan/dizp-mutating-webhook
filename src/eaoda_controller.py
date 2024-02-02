@@ -31,6 +31,7 @@ unallocated_priority_counter = Gauge('unallocated_priorities', 'Unallocated task
 eaoda = Flask(__name__)
 
 LOG_PATH = os.environ.get("LOG_PATH")
+TEST_BED_PATH = os.environ.get("TEST_BED_PATH")
 
 logging.basicConfig(filename=LOG_PATH, level=logging.INFO, 
                     format='%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]')
@@ -100,16 +101,17 @@ def process_pod():
             exec_time = pod["execTime"]
             cpu = int(pod["cpu"])
             memory = int(pod["memory"]) * 1024**2
+            arrival_time = int(time.time())
             
             eaoda.logger.info(f"Name: {pod_name} Priority: {priority} Color: {color} Exec time: {exec_time}")
-            row_to_append = [pod_id, priority.value, color, exec_time, str(int(time.time())), cpu, memory]
+            row_to_append = [pod_id, priority.value, color, exec_time, str(arrival_time), cpu, memory]
 
-            with open('test_bed.csv', 'a', newline='') as file:
+            with open(TEST_BED_PATH, 'a', newline='') as file:
                 writer = csv.writer(file)
                 writer.writerow(row_to_append)
                 file.close()
 
-            task = Task(pod_id, pod_name, cpu, memory, priority, color)
+            task = Task(pod_id, pod_name, cpu, memory, priority, color, arrival_time, exec_time)
             total_tasks_counter.labels(simulation=SIMULATION_NAME).inc()
 
             node_name = ''
@@ -160,7 +162,7 @@ def process_pod():
             pod_data = {
                 "node_name": node_name,
                 "task_id": pod_id,
-                "arrival_time": str(int(time.time())),
+                "arrival_time": str(arrival_time),
                 "exec_time": str(exec_time),
                 "priority": priority,
                 "color": color,

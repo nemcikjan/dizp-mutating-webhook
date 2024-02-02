@@ -27,11 +27,13 @@ class BaseTask(object):
         self.id = id
 
 class Task(BaseTask):
-    def __init__(self, id: str, name: str, cpu_requirement: int, memory_requirement: int, priority: Priority, color: str):
+    def __init__(self, id: str, name: str, cpu_requirement: int, memory_requirement: int, priority: Priority, color: str, arrival_time: int, exec_time: int):
         self.priority = priority
         self.name = name
         self.node_cpu_capacity = 0
         self.node_memory_capacity = 0
+        self.arrival_time = arrival_time
+        self.exec_time = exec_time
         super().__init__(id, cpu_requirement, memory_requirement, color)
     
     def objective_value(self):
@@ -328,7 +330,7 @@ def handle_pod(solver: FRICO, task_id: str, node_name: str):
         solver.release(node, task)
     except Exception as e:
         logging.warning(f"Handling pod failed {e}")
-        tasks = sorted([t for t in node.allocated_tasks], key=lambda x: x.arrival_time + x.exec_time < int(time.time()))
+        tasks = sorted(node.allocated_tasks, key=lambda x: x.arrival_time + x.exec_time < int(time.time()))
         for t in tasks:
             node.release_task(t)
     finally:

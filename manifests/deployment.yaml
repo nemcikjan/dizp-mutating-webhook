@@ -79,7 +79,7 @@ spec:
               value: Barnim
             - name: LOG_PATH
               value: /logs/app.log
-          image: ghcr.io/nemcikjan/dizp-mutating-webhook:v20240202-d18b76d
+          image: ghcr.io/nemcikjan/dizp-mutating-webhook:v20240202-6f0ce57
           imagePullPolicy: IfNotPresent
           args:
             - "--bind=0.0.0.0:8080"

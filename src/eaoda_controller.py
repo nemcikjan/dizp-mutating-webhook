@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify
-from frico import FRICO, Task, Node, Priority
+from frico import FRICO, Task, Node, Priority, remove_expired
 from prometheus_flask_exporter import PrometheusMetrics
 from prometheus_client import Counter, Gauge
 from k8s import init_nodes, watch_pods, reschedule, delete_pod, create_pod, PodData
@@ -56,6 +56,10 @@ stop_event = threading.Event()
 
 thread = threading.Thread(target=watch_pods, args=(solver, stop_event), daemon=True)
 thread.start()
+
+# Create a thread that runs the 'task' function
+cleanup_thread = threading.Thread(target=remove_expired, args=(solver,))
+cleanup_thread.start()
 
 def rescheduling(shit: Task, to_shit: Node, pod_id: str, priority: str) -> None:
     if to_shit is None:

@@ -315,14 +315,21 @@ class FRICO:
     
 def remove_expired(solver: FRICO):
     tasks = sorted([(t, k[1]) for k in solver.knapsacks for t in k[1].allocated_tasks], key=lambda x: x.arrival_time + x.exec_time < int(time.time()))
+    for t, n in tasks:
+        n.release_task(t)
+    solver.update_heap()
     
 
 def handle_pod(solver: FRICO, task_id: str, node_name: str):
+    node = solver.get_node_by_name(node_name)
     try:
-        node = solver.get_node_by_name(node_name)
         task = node.get_task_by_id(task_id)
         logging.info(f"Releasing task {task.id} from {node.name}")
         solver.release(node, task)
-        solver.update_heap()
     except Exception as e:
         logging.warning(f"Handling pod failed {e}")
+        tasks = sorted([t for t in node.allocated_tasks], key=lambda x: x.arrival_time + x.exec_time < int(time.time()))
+        for t in tasks:
+            node.release_task(t)
+    finally:
+        solver.update_heap()

@@ -30,7 +30,9 @@ unallocated_priority_counter = Gauge('unallocated_priorities', 'Unallocated task
 
 eaoda = Flask(__name__)
 
-logging.basicConfig(filename='app.log', level=logging.INFO, 
+LOG_PATH = os.environ.get("LOG_PATH")
+
+logging.basicConfig(filename=LOG_PATH, level=logging.INFO, 
                     format='%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]')
 
 metrics = PrometheusMetrics(eaoda)

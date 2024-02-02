@@ -6,3 +6,4 @@ requests
 kubernetes
 invoke
 gunicorn
+# kr8s

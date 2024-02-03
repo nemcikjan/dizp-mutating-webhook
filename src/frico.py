@@ -95,6 +95,12 @@ class Node(object):
         self.current_value -= task.priority.value
         self.current_objective -= task.objective_value()
 
+    # def get_task_by_id(self, id: str) -> Task:
+    #     task = next((t for t in self.allocated_tasks if t.id == id), None)
+    #     if task is None:
+    #         raise Exception(f"Task with id {id} not found")
+    #     return task
+
     def get_task_by_id(self, id: str) -> Task:
         task = next((t for t in self.allocated_tasks if t.id == id), None)
         if task is None:
@@ -157,9 +163,9 @@ class FRICO:
 
         while self.knapsacks:
             capacity, knapsack = heapq.heappop(self.knapsacks)
-
-            overall_free_cpu += knapsack.remaining_cpu_capacity
-            overall_free_memory +=  knapsack.remaining_memory_capacity
+            if (task.color in knapsack.colors):
+                overall_free_cpu += knapsack.remaining_cpu_capacity
+                overall_free_memory +=  knapsack.remaining_memory_capacity
 
             temp_knapsacks.append((capacity, knapsack))
 
@@ -279,7 +285,7 @@ class FRICO:
                         task_allocated = False
                         while self.knapsacks and not task_allocated:
                             capacity, knapsack = heapq.heappop(self.knapsacks)
-                            if task.color in knapsack.colors and knapsack.can_allocate(t):
+                            if t.color in knapsack.colors and knapsack.can_allocate(t):
                                 knapsack.allocate_task(t)
                                 task_allocated = True
                                 self.update_heap()
@@ -321,6 +327,20 @@ def remove_expired(solver: FRICO):
         n.release_task(t)
     solver.update_heap()
     
+
+# def handle_pod(solver: FRICO, task_id: str, node_name: str):
+#     node = solver.get_node_by_name(node_name)
+#     try:
+#         task = node.get_task_by_id(task_id)
+#         logging.info(f"Releasing task {task.id} from {node.name}")
+#         solver.release(node, task)
+#     except Exception as e:
+#         logging.warning(f"Handling pod failed {e}")
+#         tasks = sorted(node.allocated_tasks, key=lambda x: x.arrival_time + x.exec_time < int(time.time()))
+#         for t in tasks:
+#             node.release_task(t)
+#     finally:
+#         solver.update_heap()
 
 def handle_pod(solver: FRICO, task_id: str, node_name: str):
     node = solver.get_node_by_name(node_name)

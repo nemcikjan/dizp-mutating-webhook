@@ -238,8 +238,6 @@ def create():
             logging.error(f"Error while creating pod: {e}")
             return {"message": f"Error while creating pod: {e}"}
 
-
-
     return {"message": message}
 
 

@@ -57,7 +57,7 @@ spec:
     spec:
       serviceAccountName: frico
       nodeSelector:
-        kubernetes.io/hostname: odin
+        name: odin
       containers:
         - name: logs
           image: cr.fluentbit.io/fluent/fluent-bit:2.1.10
@@ -79,12 +79,12 @@ spec:
             - name: MAX_REALLOC
               value: "4"
             - name: SIMULATION_NAME
-              value: Barnim
+              value: LuST
             - name: LOG_PATH
               value: /logs/app.log
             - name: TEST_BED_PATH
-              value: /test-bed/data.csv
-          image: ghcr.io/nemcikjan/dizp-mutating-webhook:v20240203-dd34e2b
+              value: /test-bed/data-$(SIMULATION_NAME).csv
+          image: ghcr.io/nemcikjan/dizp-mutating-webhook:v20240203-f02b870
           imagePullPolicy: IfNotPresent
           args:
             - "--bind=0.0.0.0:8080"
